@@ -17,18 +17,17 @@
     ::-webkit-scrollbar{width:6px;height:6px}
     ::-webkit-scrollbar-track{background:#F7F6F3}
     ::-webkit-scrollbar-thumb{background:#E0DED8;border-radius:3px}
-    code{background:#F0EFE9;padding:1px 5px;border-radius:3px;font-size:11px;color:#6B7280}
   </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-// ═══════════════════════════════════════════════════════════════
-// CONFIGURATION — remplacez ces 2 valeurs par les vôtres
-// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
+// CONFIGURATION
+// ═══════════════════════════════════════════════════════
 const SUPABASE_URL      = 'https://mtrvcgicwcraqjxknoid.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im10cnZjZ2ljd2NyYXFqeGtub2lkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzk4NDksImV4cCI6MjA5MTkxNTg0OX0.F78OxlzPOIxpMhXkCFSA9Y96cJUUVpe6mw3S3aM6XJA';
-// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
 
 const { createClient } = supabase;
 const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -38,216 +37,162 @@ const CATS    = ['Core Quality','Quality Aggressive','Speculative'];
 const ENVS    = ['PEA','CTO','PER'];
 const CAT_CLR = {'Core Quality':'#2563EB','Quality Aggressive':'#7C3AED','Speculative':'#D97706'};
 const ENV_CLR = {PEA:'#059669',CTO:'#2563EB',PER:'#EA580C'};
+const FX_TICKERS = ['EURUSD=X','EURCAD=X','EURDKK=X'];
 
 const SEED = [
-  {ticker:'MSCI',      name:'MSCI Inc.',              env:'CTO',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'SPGI',      name:'S&P Global',             env:'CTO',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'CSU.TO',    name:'Constellation Software', env:'CTO',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'MSFT',      name:'Microsoft',              env:'CTO',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'RACE.MI',   name:'Ferrari',                env:'PEA',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:25},
-  {ticker:'NOV.DE',    name:'Novo Nordisk',           env:'PEA',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'ASML',      name:'ASML',                   env:'PEA',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'ASM.AS',    name:'ASM International',      env:'PEA',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'TSM',       name:'TSMC',                   env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'GOOGL',     name:'Alphabet',               env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'AMZN',      name:'Amazon',                 env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'META',      name:'Meta',                   env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'NFLX',      name:'Netflix',                env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'ADYEN.AS',  name:'Adyen',                  env:'PEA',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'BKNG',      name:'Booking Holdings',       env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'TTD',       name:'The Trade Desk',         env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:35},
-  {ticker:'UBER',      name:'Uber',                   env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:35},
-  {ticker:'MELI',      name:'MercadoLibre',           env:'CTO',cat:'Speculative',       qte:0,pru:0,pc1:0,mos:35},
-  {ticker:'NEU.PA',    name:'Neurone',                env:'PEA',cat:'Speculative',       qte:0,pru:0,pc1:0,mos:35},
+  {ticker:'MSCI',     name:'MSCI Inc.',              env:'CTO',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'SPGI',     name:'S&P Global',             env:'CTO',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'CSU.TO',   name:'Constellation Software', env:'CTO',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'MSFT',     name:'Microsoft',              env:'CTO',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'RACE.MI',  name:'Ferrari',                env:'PEA',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:25},
+  {ticker:'NOV.DE',   name:'Novo Nordisk',           env:'PEA',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'ASML',     name:'ASML',                   env:'PEA',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'ASM.AS',   name:'ASM International',      env:'PEA',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'TSM',      name:'TSMC',                   env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'GOOGL',    name:'Alphabet',               env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'AMZN',     name:'Amazon',                 env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'META',     name:'Meta',                   env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'NFLX',     name:'Netflix',                env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'ADYEN.AS', name:'Adyen',                  env:'PEA',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'BKNG',     name:'Booking Holdings',       env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'TTD',      name:'The Trade Desk',         env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:35},
+  {ticker:'UBER',     name:'Uber',                   env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:35},
+  {ticker:'MELI',     name:'MercadoLibre',           env:'CTO',cat:'Speculative',       qte:0,pru:0,pc1:0,mos:35},
+  {ticker:'NEU.PA',   name:'Neurone',                env:'PEA',cat:'Speculative',       qte:0,pru:0,pc1:0,mos:35},
 ];
 
-const fmt  = (n,d=2) => n==null?'—':Number(n).toLocaleString('fr-FR',{minimumFractionDigits:d,maximumFractionDigits:d});
-const fmtS = (n,c='') => n==null?'—':(n>=0?'+':'')+fmt(n,0)+(c?' '+c:'');
-const pClr = n => n==null?'#9CA3AF':n>=0?'#16A34A':'#DC2626';
-
-function calcPos(p,prices){
-  const px=prices[p.ticker],cours=px?.p??null,cur=px?.c??'';
-  const pc2=p.pc1>0?p.pc1*(1-p.mos/200):0;
-  const pc3=p.pc1>0?p.pc1*(1-p.mos/100):0;
-  const pl_pct=cours&&p.pru?((cours-p.pru)/p.pru)*100:null;
-  const pl_abs=cours&&p.pru&&p.qte?(cours-p.pru)*p.qte:null;
-  const mos1=cours&&p.pc1?((p.pc1-cours)/p.pc1)*100:null;
-  const mos2=cours&&pc2?((pc2-cours)/pc2)*100:null;
-  const mos3=cours&&pc3?((pc3-cours)/pc3)*100:null;
-  const val=cours&&p.qte?cours*p.qte:null;
-  return {cours,cur,pc2,pc3,pl_pct,pl_abs,mos1,mos2,mos3,val};
-}
-
-async function fetchPrices(positions){
-  const BATCH=10; const px={};
-  for(let i=0;i<positions.length;i+=BATCH){
-    const batch=positions.slice(i,i+BATCH);
-    const symbols=batch.map(p=>p.ticker).join(',');
-    try{
-      const r=await fetch(`/api/prices?symbols=${encodeURIComponent(symbols)}`);
-      const d=await r.json();
-      (d.quoteResponse?.result||[]).forEach(q=>{
-        const date=q.regularMarketTime?new Date(q.regularMarketTime*1000).toLocaleDateString('fr-FR'):null;
-        px[q.symbol]={p:q.regularMarketPrice,c:q.currency,d:date};
-      });
-    }catch{}
-  }
-  return px;
-}
-
-function PieChart({data,colorMap,size=180}){
-  const total=data.reduce((s,d)=>s+d.value,0);
-  if(!total) return <div style={{color:'#9CA3AF',textAlign:'center',padding:20,fontSize:12}}>Renseignez quantités et PRU</div>;
-  let cum=-Math.PI/2;
-  const R=80,cx=100,cy=100;
-  const slices=data.map(d=>{
-    const angle=(d.value/total)*2*Math.PI;
-    const a1=cum,a2=cum+angle;cum=a2;
-    return{...d,x1:cx+R*Math.cos(a1),y1:cy+R*Math.sin(a1),x2:cx+R*Math.cos(a2),y2:cy+R*Math.sin(a2),
-      large:angle>Math.PI?1:0,mx:cx+(R*.65)*Math.cos((a1+a2)/2),my:cy+(R*.65)*Math.sin((a1+a2)/2),
-      pct:Math.round(d.value/total*100),color:colorMap[d.name]||'#2563EB'};
-  });
-  return(
-    <svg viewBox="0 0 200 200" style={{width:size,height:size}}>
-      {slices.map((s,i)=>(
-        <g key={i}>
-          <path d={`M ${cx} ${cy} L ${s.x1} ${s.y1} A ${R} ${R} 0 ${s.large} 1 ${s.x2} ${s.y2} Z`}
-            fill={s.color} stroke="#FFFFFF" strokeWidth="2"/>
-          {s.pct>5&&<text x={s.mx} y={s.my} textAnchor="middle" dominantBaseline="middle"
-            style={{fontSize:10,fill:'#fff',fontWeight:700}}>{s.pct}%</text>}
-        </g>
-      ))}
-    </svg>
-  );
-}
-
-function Badge({text,color}){
-  return <span style={{display:'inline-block',padding:'2px 8px',borderRadius:4,fontSize:11,fontWeight:600,background:color+'18',color}}>{text}</span>;
-}
-
-function MosBar({label,value}){
-  const clr=pClr(value);
-  return(
-    <div style={{marginTop:6}}>
-      <div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:3}}>
-        <span style={{color:'#9CA3AF'}}>{label}</span>
-        <span style={{color:clr,fontWeight:700}}>{value==null?'—':(value>=0?'+':'')+fmt(value)+'%'}</span>
-      </div>
-      {value!=null&&<div style={{height:3,background:'#EEEDe9',borderRadius:2}}>
-        <div style={{width:Math.min(Math.abs(value),100)+'%',height:'100%',background:clr,borderRadius:2}}/>
-      </div>}
-    </div>
-  );
-}
-
-function PcCard({label,pc,mos,cur}){
-  const has=pc>0;
-  const bClr=!has?'#E5E4DF':mos==null?'#E5E4DF':mos>=0?'#16A34A40':'#DC262630';
-  const bgClr=!has?'#FAFAF8':mos==null?'#FAFAF8':mos>=0?'#F0FDF4':'#FEF2F2';
-  return(
-    <div style={{background:bgClr,border:'1px solid '+bClr,borderRadius:8,padding:'10px 14px',flex:1,minWidth:130}}>
-      <div style={{fontSize:10,color:'#9CA3AF',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:6}}>{label}</div>
-      <div style={{fontSize:16,fontWeight:700,color:has?(mos!=null&&mos>=0?'#16A34A':'#191919'):'#D1D5DB'}}>
-        {has?fmt(pc):'—'}{has&&cur&&<span style={{fontSize:10,color:'#9CA3AF',marginLeft:4}}>{cur}</span>}
-      </div>
-      <MosBar label="Marge act." value={mos}/>
-    </div>
-  );
-}
-
-const FIELDS=[
-  {k:'ticker',l:'Ticker Yahoo',t:'text'},
-  {k:'name',  l:'Nom',         t:'text'},
-  {k:'qte',   l:'Quantité',    t:'number'},
-  {k:'pru',   l:'PRU',         t:'number'},
-  {k:'pc1',   l:'Prix Cible 1',t:'number'},
-  {k:'mos',   l:'MoS requise %',t:'number'},
-];
-
-function PosForm({init,onSave,onCancel,s,isNew=false}){
-  const [f,setF]=useState({...init});
-  const upd=(k,v)=>setF(p=>({...p,[k]:v}));
-  return(
-    <div>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(155px,1fr))',gap:12}}>
-        {FIELDS.map(({k,l,t})=>(
-          <div key={k}>
-            <label style={s.lbl}>{l}</label>
-            <input style={s.inp} type={t} value={f[k]??''} onChange={e=>upd(k,t==='number'?parseFloat(e.target.value)||0:e.target.value)}/>
-          </div>
-        ))}
-        <div><label style={s.lbl}>Enveloppe</label>
-          <select style={s.inp} value={f.env} onChange={e=>upd('env',e.target.value)}>
-            {ENVS.map(e=><option key={e}>{e}</option>)}
-          </select>
-        </div>
-        <div><label style={s.lbl}>Catégorie</label>
-          <select style={s.inp} value={f.cat} onChange={e=>upd('cat',e.target.value)}>
-            {CATS.map(c=><option key={c}>{c}</option>)}
-          </select>
-        </div>
-      </div>
-      <div style={{display:'flex',gap:8,marginTop:14}}>
-        <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>onSave(f)}>{isNew?'+ Ajouter':'✓ Sauvegarder'}</button>
-        <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280'}} onClick={onCancel}>Annuler</button>
-      </div>
-    </div>
-  );
-}
+// ── Helpers ───────────────────────────────────────────
+const fmt   = (n,d=2) => n==null?'—':Number(n).toLocaleString('fr-FR',{minimumFractionDigits:d,maximumFractionDigits:d});
+const fmtEUR= (n) => n==null?'—':fmt(n,0)+' €';
+const pClr  = n => n==null?'#9CA3AF':n>=0?'#16A34A':'#DC2626';
+const mosClr= n => n==null?'#9CA3AF':n>=15?'#16A34A':n>=0?'#D97706':'#DC2626';
 
 function App(){
-  const [pos,      setPos]      = useState([]);
-  const [prices,   setPrices]   = useState({});
-  const [loading,  setLoading]  = useState(true);
-  const [fetching, setFetching] = useState(false);
-  const [lastUpd,  setLastUpd]  = useState(null);
-  const [error,    setError]    = useState(null);
-  const [tab,      setTab]      = useState('portfolio');
-  const [expanded, setExpanded] = useState(new Set());
-  const [editId,   setEditId]   = useState(null);
-  const [addNew,   setAddNew]   = useState(false);
-  const [delId,    setDelId]    = useState(null);
-  const [fEnv,     setFEnv]     = useState('ALL');
-  const [fCat,     setFCat]     = useState('ALL');
+  const [pos,       setPos]      = useState([]);
+  const [wl,        setWl]       = useState([]);
+  const [prices,    setPrices]   = useState({});
+  const [fx,        setFX]       = useState({});
+  const [loading,   setLoading]  = useState(true);
+  const [fetching,  setFetching] = useState(false);
+  const [lastUpd,   setLastUpd]  = useState(null);
+  const [error,     setError]    = useState(null);
+  const [tab,       setTab]      = useState('portfolio');
+  const [expanded,  setExpanded] = useState(new Set());
+  const [editId,    setEditId]   = useState(null);
+  const [addNew,    setAddNew]   = useState(false);
+  const [delId,     setDelId]    = useState(null);
+  const [fEnv,      setFEnv]     = useState('ALL');
+  const [fCat,      setFCat]     = useState('ALL');
+  const [wlForm,    setWlForm]   = useState({ticker:'',name:'',pc1:0,mos:30});
+  const [wlAdding,  setWlAdding] = useState(false);
+
+  // FX conversion
+  const toEUR = (amount, currency) => {
+    if (!amount) return null;
+    if (!currency || currency==='EUR') return amount;
+    if (currency==='USD') return fx['EURUSD=X'] ? amount/fx['EURUSD=X'] : null;
+    if (currency==='CAD') return fx['EURCAD=X'] ? amount/fx['EURCAD=X'] : null;
+    if (currency==='DKK') return fx['EURDKK=X'] ? amount/fx['EURDKK=X'] : null;
+    return amount;
+  };
+
+  function calcPos(p) {
+    const px=prices[p.ticker], cours=px?.p??null, cur=px?.c??'';
+    const pc2=p.pc1>0?p.pc1*(1-p.mos/200):0;
+    const pc3=p.pc1>0?p.pc1*(1-p.mos/100):0;
+    const pl_pct=cours&&p.pru?((cours-p.pru)/p.pru)*100:null;
+    const pl_abs=cours&&p.pru&&p.qte?(cours-p.pru)*p.qte:null;
+    const pl_eur=toEUR(pl_abs,cur);
+    const mos1=cours&&p.pc1?((p.pc1-cours)/p.pc1)*100:null;
+    const mos2=cours&&pc2?((pc2-cours)/pc2)*100:null;
+    const mos3=cours&&pc3?((pc3-cours)/pc3)*100:null;
+    const val=cours&&p.qte?cours*p.qte:null;
+    const valEUR=toEUR(val,cur);
+    return {cours,cur,pc2,pc3,pl_pct,pl_abs,pl_eur,mos1,mos2,mos3,val,valEUR};
+  }
 
   useEffect(()=>{init();},[]);
 
   async function init(){
-    const {data,error:err}=await db.from('positions').select('*').order('id');
-    if(err){setError('Supabase: '+err.message);setLoading(false);return;}
-    let positions=data&&data.length>0?data:[];
+    // Load positions
+    const {data:posData,error:e1}=await db.from('positions').select('*').order('id');
+    if(e1){setError('Supabase: '+e1.message);setLoading(false);return;}
+    let positions=posData&&posData.length>0?posData:[];
     if(positions.length===0){
       const {data:seeded}=await db.from('positions').insert(SEED).select();
       positions=seeded||[];
     }
     setPos(positions);
-    await doFetch(positions);
+
+    // Load watchlist
+    const {data:wlData}=await db.from('watchlist').select('*').order('id');
+    const watchlist=wlData||[];
+    setWl(watchlist);
+
+    await doFetch(positions,watchlist);
     setLoading(false);
   }
 
-  async function doFetch(positions){
+  async function doFetch(positions,watchlist){
     setFetching(true);setError(null);
+    const p=positions||pos, w=watchlist||wl;
+    const allTickers=[...new Set([
+      ...p.map(x=>x.ticker),
+      ...w.map(x=>x.ticker),
+      ...FX_TICKERS
+    ])];
     try{
-      const px=await fetchPrices(positions||pos);
-      if(Object.keys(px).length>0){setPrices(px);setLastUpd(new Date());}
-      else setError('Yahoo Finance : aucun cours récupéré.');
+      const px=await fetchAllPrices(allTickers);
+      const newFX={};
+      FX_TICKERS.forEach(t=>{if(px[t]){newFX[t]=px[t].p;delete px[t];}});
+      setFX(newFX);
+      setPrices(px);
+      setLastUpd(new Date());
     }catch(e){setError('Erreur : '+e.message);}
     setFetching(false);
   }
 
+  async function fetchAllPrices(tickers){
+    const BATCH=10, px={};
+    for(let i=0;i<tickers.length;i+=BATCH){
+      const syms=tickers.slice(i,i+BATCH).join(',');
+      try{
+        const r=await fetch(`/api/prices?symbols=${encodeURIComponent(syms)}`);
+        const d=await r.json();
+        (d.quoteResponse?.result||[]).forEach(q=>{
+          px[q.symbol]={p:q.regularMarketPrice,c:q.currency};
+        });
+      }catch{}
+    }
+    return px;
+  }
+
+  // Position CRUD
   async function addPos(f){
     const {data}=await db.from('positions').insert([f]).select();
-    if(data){const u=[...pos,...data];setPos(u);await doFetch(u);}
+    if(data){const u=[...pos,...data];setPos(u);doFetch(u,wl);}
     setAddNew(false);
   }
   async function updPos(f){
     await db.from('positions').update(f).eq('id',f.id);
-    const u=pos.map(x=>x.id===f.id?f:x);setPos(u);setEditId(null);await doFetch(u);
+    const u=pos.map(x=>x.id===f.id?f:x);setPos(u);setEditId(null);doFetch(u,wl);
   }
   async function delPos(id){
     await db.from('positions').delete().eq('id',id);
     setPos(pos.filter(x=>x.id!==id));setDelId(null);
   }
+
+  // Watchlist CRUD
+  async function addWl(){
+    const {data}=await db.from('watchlist').insert([wlForm]).select();
+    if(data){const u=[...wl,...data];setWl(u);doFetch(pos,u);}
+    setWlAdding(false);setWlForm({ticker:'',name:'',pc1:0,mos:30});
+  }
+  async function delWl(id){
+    await db.from('watchlist').delete().eq('id',id);
+    setWl(wl.filter(x=>x.id!==id));
+  }
+
   const toggle=id=>setExpanded(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
 
   const s={
@@ -255,26 +200,145 @@ function App(){
     lbl: {fontSize:11,color:'#9CA3AF',marginBottom:4,display:'block'},
     inp: {background:'#FFFFFF',border:'1px solid #E0DED8',borderRadius:6,padding:'5px 8px',color:'#191919',fontSize:13,width:'100%'},
     th:  {padding:'9px 12px',textAlign:'left',color:'#9CA3AF',fontWeight:600,fontSize:11,textTransform:'uppercase',letterSpacing:'0.05em',borderBottom:'1px solid #F0EFE9',whiteSpace:'nowrap'},
-    td:  {padding:'11px 12px',borderBottom:'1px solid #F7F6F3',verticalAlign:'middle'},
+    td:  {padding:'10px 12px',borderBottom:'1px solid #F7F6F3',verticalAlign:'middle'},
     card:{background:'#FFFFFF',borderRadius:12,padding:16,border:'1px solid #EEEDE9'},
   };
 
   if(loading) return(
     <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#F7F6F3'}}>
-      <div style={{textAlign:'center',color:'#9CA3AF'}}>
-        <div style={{fontSize:44,marginBottom:12}}>📊</div>
-        <div>Connexion à Supabase...</div>
-      </div>
+      <div style={{textAlign:'center',color:'#9CA3AF'}}><div style={{fontSize:44,marginBottom:12}}>📊</div><div>Chargement...</div></div>
     </div>
   );
 
+  // ── Derived data ──────────────────────────────────────
   const filtered =pos.filter(p=>(fEnv==='ALL'||p.env===fEnv)&&(fCat==='ALL'||p.cat===fCat));
   const grouped  =CATS.map(cat=>({cat,items:filtered.filter(p=>p.cat===cat)})).filter(g=>g.items.length>0);
-  const totalVal =pos.reduce((s,p)=>s+(calcPos(p,prices).val||0),0);
-  const byEnv    =ENVS.map(e=>({name:e,value:Math.round(pos.filter(p=>p.env===e).reduce((s,p)=>s+(calcPos(p,prices).val||0),0))})).filter(x=>x.value>0);
-  const byCat    =CATS.map(c=>({name:c,value:Math.round(pos.filter(p=>p.cat===c).reduce((s,p)=>s+(calcPos(p,prices).val||0),0))})).filter(x=>x.value>0);
-  const posRanked=pos.map(p=>({...p,...calcPos(p,prices)})).sort((a,b)=>(b.val||0)-(a.val||0));
 
+  // Total EUR (aggregate unique tickers across envelopes)
+  const totalEUR=pos.reduce((s,p)=>s+(calcPos(p).valEUR||0),0);
+
+  // Allocation: aggregate by ticker
+  const byTicker={};
+  pos.forEach(p=>{
+    const {valEUR,cur}=calcPos(p);
+    if(!byTicker[p.ticker]) byTicker[p.ticker]={ticker:p.ticker,name:p.name,cat:p.cat,envs:[],valEUR:0};
+    byTicker[p.ticker].valEUR+=(valEUR||0);
+    if(!byTicker[p.ticker].envs.includes(p.env)) byTicker[p.ticker].envs.push(p.env);
+  });
+  const posRankedEUR=Object.values(byTicker).sort((a,b)=>b.valEUR-a.valEUR);
+
+  // Allocation by envelope (EUR)
+  const byEnv=ENVS.map(e=>({name:e,value:Math.round(pos.filter(p=>p.env===e).reduce((s,p)=>s+(calcPos(p).valEUR||0),0))})).filter(x=>x.value>0);
+  const byCat=CATS.map(c=>({name:c,value:Math.round(pos.filter(p=>p.cat===c).reduce((s,p)=>s+(calcPos(p).valEUR||0),0))})).filter(x=>x.value>0);
+
+  // Watchlist: merge portfolio (dedup by ticker) + watchlist items, sort by mos1 desc
+  const seenTk=new Set();
+  const wlMerged=[];
+  pos.filter(p=>p.pc1>0).forEach(p=>{
+    if(!seenTk.has(p.ticker)){seenTk.add(p.ticker);wlMerged.push({...p,wlType:'portfolio'});}
+  });
+  wl.forEach(w=>{
+    if(!seenTk.has(w.ticker)){seenTk.add(w.ticker);wlMerged.push({...w,wlType:'watch',env:null,cat:null,qte:0,pru:0});}
+  });
+  wlMerged.sort((a,b)=>{
+    const ma=prices[a.ticker]?.p&&a.pc1?((a.pc1-prices[a.ticker].p)/a.pc1)*100:-999;
+    const mb=prices[b.ticker]?.p&&b.pc1?((b.pc1-prices[b.ticker].p)/b.pc1)*100:-999;
+    return mb-ma;
+  });
+
+  function PieChart({data,colorMap,size=170}){
+    const total=data.reduce((s,d)=>s+d.value,0);
+    if(!total) return <div style={{color:'#9CA3AF',textAlign:'center',padding:20,fontSize:12}}>Renseignez quantités et PRU</div>;
+    let cum=-Math.PI/2;const R=80,cx=100,cy=100;
+    const slices=data.map(d=>{
+      const angle=(d.value/total)*2*Math.PI,a1=cum,a2=cum+angle;cum=a2;
+      return{...d,x1:cx+R*Math.cos(a1),y1:cy+R*Math.sin(a1),x2:cx+R*Math.cos(a2),y2:cy+R*Math.sin(a2),
+        large:angle>Math.PI?1:0,mx:cx+(R*.65)*Math.cos((a1+a2)/2),my:cy+(R*.65)*Math.sin((a1+a2)/2),
+        pct:Math.round(d.value/total*100),color:colorMap[d.name]||'#2563EB'};
+    });
+    return(
+      <svg viewBox="0 0 200 200" style={{width:size,height:size}}>
+        {slices.map((s,i)=>(
+          <g key={i}>
+            <path d={`M ${cx} ${cy} L ${s.x1} ${s.y1} A ${R} ${R} 0 ${s.large} 1 ${s.x2} ${s.y2} Z`} fill={s.color} stroke="#FFF" strokeWidth="2"/>
+            {s.pct>5&&<text x={s.mx} y={s.my} textAnchor="middle" dominantBaseline="middle" style={{fontSize:10,fill:'#fff',fontWeight:700}}>{s.pct}%</text>}
+          </g>
+        ))}
+      </svg>
+    );
+  }
+
+  function Badge({text,color}){
+    return <span style={{display:'inline-block',padding:'2px 7px',borderRadius:4,fontSize:11,fontWeight:600,background:color+'18',color}}>{text}</span>;
+  }
+
+  function MosBar({value,label}){
+    const clr=mosClr(value);
+    return(
+      <div style={{marginTop:5}}>
+        <div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:2}}>
+          <span style={{color:'#9CA3AF'}}>{label}</span>
+          <span style={{color:clr,fontWeight:700}}>{value==null?'—':(value>=0?'+':'')+fmt(value)+'%'}</span>
+        </div>
+        {value!=null&&<div style={{height:3,background:'#EEEDE9',borderRadius:2}}>
+          <div style={{width:Math.min(Math.abs(value),100)+'%',height:'100%',background:clr,borderRadius:2}}/>
+        </div>}
+      </div>
+    );
+  }
+
+  function PcCard({label,pc,mos,cur}){
+    const has=pc>0;
+    const bg=!has?'#FAFAF8':mos>=0?'#F0FDF4':'#FEF2F2';
+    const border=!has?'#EEEDE9':mos>=0?'#16A34A30':'#DC262630';
+    return(
+      <div style={{background:bg,border:'1px solid '+border,borderRadius:8,padding:'10px 12px',flex:1,minWidth:120}}>
+        <div style={{fontSize:9,color:'#9CA3AF',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:4}}>{label}</div>
+        <div style={{fontSize:15,fontWeight:700,color:has?(mos>=0?'#16A34A':'#191919'):'#D1D5DB'}}>
+          {has?fmt(pc):'—'}{has&&cur&&<span style={{fontSize:10,color:'#9CA3AF',marginLeft:3}}>{cur}</span>}
+        </div>
+        <MosBar value={mos} label="Marge act."/>
+      </div>
+    );
+  }
+
+  const POS_FIELDS=[
+    {k:'ticker',l:'Ticker Yahoo',t:'text'},{k:'name',l:'Nom',t:'text'},
+    {k:'qte',l:'Quantité',t:'number'},{k:'pru',l:'PRU',t:'number'},
+    {k:'pc1',l:'Prix Cible 1',t:'number'},{k:'mos',l:'MoS requise %',t:'number'},
+  ];
+
+  function PosForm({init,onSave,onCancel,isNew=false}){
+    const [f,setF]=useState({...init});
+    const upd=(k,v)=>setF(p=>({...p,[k]:v}));
+    return(
+      <div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:12}}>
+          {POS_FIELDS.map(({k,l,t})=>(
+            <div key={k}><label style={s.lbl}>{l}</label>
+              <input style={s.inp} type={t} value={f[k]??''} onChange={e=>upd(k,t==='number'?parseFloat(e.target.value)||0:e.target.value)}/>
+            </div>
+          ))}
+          <div><label style={s.lbl}>Enveloppe</label>
+            <select style={s.inp} value={f.env} onChange={e=>upd('env',e.target.value)}>
+              {ENVS.map(e=><option key={e}>{e}</option>)}
+            </select>
+          </div>
+          <div><label style={s.lbl}>Catégorie</label>
+            <select style={s.inp} value={f.cat} onChange={e=>upd('cat',e.target.value)}>
+              {CATS.map(c=><option key={c}>{c}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{display:'flex',gap:8,marginTop:14}}>
+          <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>onSave(f)}>{isNew?'+ Ajouter':'✓ Sauvegarder'}</button>
+          <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280'}} onClick={onCancel}>Annuler</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── RENDER ───────────────────────────────────────────
   return(
     <div style={{background:'#F7F6F3',minHeight:'100vh',color:'#191919',fontFamily:'system-ui,sans-serif',fontSize:14}}>
 
@@ -284,30 +348,34 @@ function App(){
           <div style={{fontSize:18,fontWeight:700,color:'#191919',letterSpacing:'-0.02em'}}>📊 Portfolio Tracker</div>
           <div style={{fontSize:12,color:'#9CA3AF',marginTop:2}}>
             {lastUpd?`Actualisé le ${lastUpd.toLocaleDateString('fr-FR')} à ${lastUpd.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}`:'—'}
-            {fetching&&<span style={{color:'#CF6D56',marginLeft:8}}>⟳ Yahoo Finance...</span>}
+            {fetching&&<span style={{color:'#CF6D56',marginLeft:8}}>⟳ Chargement...</span>}
           </div>
         </div>
         <div style={{display:'flex',gap:8,alignItems:'center'}}>
-          {error&&<span style={{color:'#DC2626',fontSize:12,maxWidth:280}}>⚠️ {error}</span>}
-          <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280'}} onClick={()=>doFetch(pos)} disabled={fetching}>⟳ Actualiser</button>
+          {error&&<span style={{color:'#DC2626',fontSize:12,maxWidth:260}}>⚠️ {error}</span>}
+          <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280'}} onClick={()=>doFetch()} disabled={fetching}>⟳ Actualiser</button>
         </div>
       </div>
 
-      {/* Summary */}
+      {/* Summary strip */}
       <div style={{display:'flex',gap:10,padding:'12px 24px',background:'#FFFFFF',borderBottom:'1px solid #EEEDE9',overflowX:'auto'}}>
-        {[{l:'Positions',v:pos.length},{l:'PEA',v:pos.filter(p=>p.env==='PEA').length+' pos.'},{l:'CTO',v:pos.filter(p=>p.env==='CTO').length+' pos.'},{l:'PER',v:pos.filter(p=>p.env==='PER').length+' pos.'},{l:'Valeur totale *',v:totalVal>0?fmt(totalVal,0):'—'}]
-          .map(({l,v})=>(
-          <div key={l} style={{flex:'none',minWidth:110,padding:'10px 14px',background:'#F7F6F3',borderRadius:10,border:'1px solid #EEEDE9'}}>
+        {[
+          {l:'Positions',v:pos.length},
+          {l:'PEA',v:pos.filter(p=>p.env==='PEA').length+' pos.'},
+          {l:'CTO',v:pos.filter(p=>p.env==='CTO').length+' pos.'},
+          {l:'PER',v:pos.filter(p=>p.env==='PER').length+' pos.'},
+          {l:'Valeur totale (€)',v:totalEUR>0?fmtEUR(totalEUR):'—'},
+        ].map(({l,v})=>(
+          <div key={l} style={{flex:'none',minWidth:120,padding:'10px 14px',background:'#F7F6F3',borderRadius:10,border:'1px solid #EEEDE9'}}>
             <div style={{fontSize:10,color:'#9CA3AF',marginBottom:4,textTransform:'uppercase',letterSpacing:'0.05em'}}>{l}</div>
             <div style={{fontWeight:700,color:'#191919',fontSize:15}}>{v}</div>
           </div>
         ))}
-        {totalVal>0&&<div style={{fontSize:11,color:'#D1D5DB',alignSelf:'center',marginLeft:4}}>* multi-devises sans conversion</div>}
       </div>
 
       {/* Tabs */}
       <div style={{display:'flex',gap:2,padding:'10px 24px',background:'#FFFFFF',borderBottom:'1px solid #EEEDE9'}}>
-        {[{id:'portfolio',l:'📋 Portefeuille'},{id:'allocation',l:'🥧 Allocation'},{id:'editeur',l:'✏️ Éditeur'}].map(({id,l})=>(
+        {[{id:'portfolio',l:'📋 Portefeuille'},{id:'watchlist',l:'👁 Watchlist'},{id:'allocation',l:'🥧 Allocation'},{id:'editeur',l:'✏️ Éditeur'}].map(({id,l})=>(
           <button key={id} onClick={()=>setTab(id)}
             style={{...s.btn,background:tab===id?'#191919':'transparent',color:tab===id?'#FFFFFF':'#6B7280',padding:'7px 16px'}}>
             {l}
@@ -317,7 +385,7 @@ function App(){
 
       <div style={{padding:24}}>
 
-        {/* PORTEFEUILLE */}
+        {/* ── PORTEFEUILLE ── */}
         {tab==='portfolio'&&(
           <div>
             <div style={{display:'flex',gap:6,marginBottom:16,flexWrap:'wrap',alignItems:'center'}}>
@@ -346,8 +414,8 @@ function App(){
                   <tr style={{background:'#FAFAF8'}}>
                     <th style={{...s.th,width:28}}></th>
                     <th style={s.th}>Titre</th><th style={s.th}>Env.</th><th style={s.th}>Qté</th>
-                    <th style={s.th}>PRU</th><th style={s.th}>Cours</th><th style={s.th}>+/- %</th>
-                    <th style={s.th}>+/- devise</th><th style={s.th}>Valeur</th>
+                    <th style={s.th}>PRU</th><th style={s.th}>Cours</th>
+                    <th style={s.th}>+/- %</th><th style={s.th}>+/- €</th><th style={s.th}>Valeur €</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -355,9 +423,8 @@ function App(){
                     <Fragment key={cat}>
                       <tr><td colSpan={9} style={{padding:'6px 12px',background:'#F7F6F3',fontSize:10,fontWeight:700,color:CAT_CLR[cat],textTransform:'uppercase',letterSpacing:'0.08em'}}>▪ {cat}</td></tr>
                       {items.map(p=>{
-                        const {cours,cur,pc2,pc3,pl_pct,pl_abs,mos1,mos2,mos3,val}=calcPos(p,prices);
-                        const isExp=expanded.has(p.id),px=prices[p.ticker];
-                        const today=new Date().toLocaleDateString('fr-FR');
+                        const {cours,cur,pc2,pc3,pl_pct,pl_eur,mos1,mos2,mos3,valEUR}=calcPos(p);
+                        const isExp=expanded.has(p.id);
                         return(
                           <Fragment key={p.id}>
                             <tr onClick={()=>toggle(p.id)} style={{cursor:'pointer'}}
@@ -365,19 +432,19 @@ function App(){
                               onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                               <td style={{...s.td,color:'#9CA3AF',fontSize:12}}>{isExp?'▾':'▸'}</td>
                               <td style={s.td}>
-                                <div style={{fontWeight:600,color:'#191919'}}>{p.ticker}</div>
+                                <div style={{fontWeight:600}}>{p.ticker}</div>
                                 <div style={{fontSize:11,color:'#9CA3AF'}}>{p.name}</div>
                               </td>
                               <td style={s.td}><Badge text={p.env} color={ENV_CLR[p.env]}/></td>
                               <td style={{...s.td,color:'#6B7280'}}>{p.qte||'—'}</td>
-                              <td style={{...s.td,color:'#6B7280'}}>{p.pru?fmt(p.pru):'—'}</td>
+                              <td style={{...s.td,color:'#6B7280'}}>{p.pru?fmt(p.pru)+' '+cur:'—'}</td>
                               <td style={s.td}>
-                                <div style={{fontWeight:600,color:'#191919'}}>{cours?fmt(cours):'—'} {cur&&<span style={{fontSize:10,color:'#9CA3AF'}}>{cur}</span>}</div>
-                                {px?.d&&<div style={{fontSize:10,color:px.d===today?'#16A34A':'#D97706'}}>{px.d}</div>}
+                                <span style={{fontWeight:600}}>{cours?fmt(cours):'—'}</span>
+                                {cur&&<span style={{fontSize:10,color:'#9CA3AF',marginLeft:4}}>{cur}</span>}
                               </td>
                               <td style={s.td}><span style={{color:pClr(pl_pct),fontWeight:600}}>{pl_pct==null?'—':(pl_pct>=0?'+':'')+fmt(pl_pct)+'%'}</span></td>
-                              <td style={s.td}><span style={{color:pClr(pl_abs),fontWeight:600}}>{pl_abs==null?'—':fmtS(pl_abs,cur)}</span></td>
-                              <td style={{...s.td,color:'#6B7280'}}>{val?fmt(val,0)+' '+cur:'—'}</td>
+                              <td style={s.td}><span style={{color:pClr(pl_eur),fontWeight:600}}>{pl_eur==null?'—':(pl_eur>=0?'+':'')+fmt(pl_eur,0)+' €'}</span></td>
+                              <td style={{...s.td,color:'#6B7280'}}>{valEUR?fmtEUR(valEUR):'—'}</td>
                             </tr>
                             {isExp&&(
                               <tr><td colSpan={9} style={{padding:'14px 24px',background:'#FAFAF8',borderBottom:'1px solid #EEEDE9'}}>
@@ -385,8 +452,8 @@ function App(){
                                   <PcCard label="PC1 — Prix juste" pc={p.pc1} mos={mos1} cur={cur}/>
                                   <PcCard label={`PC2 — ½ MoS (${(p.mos/2).toFixed(0)}%)`} pc={pc2} mos={mos2} cur={cur}/>
                                   <PcCard label={`PC3 — MoS pleine (${p.mos}%)`} pc={pc3} mos={mos3} cur={cur}/>
-                                  <div style={{marginLeft:8,alignSelf:'center',fontSize:12}}>
-                                    <div style={{color:'#9CA3AF'}}>MoS requise</div>
+                                  <div style={{marginLeft:8,alignSelf:'center'}}>
+                                    <div style={{fontSize:11,color:'#9CA3AF'}}>MoS requise</div>
                                     <div style={{fontWeight:800,fontSize:22,color:'#191919',marginTop:2}}>{p.mos}%</div>
                                     <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',marginTop:10,fontSize:12,padding:'4px 12px'}}
                                       onClick={e=>{e.stopPropagation();setEditId(p.id);setTab('editeur');}}>✏️ Modifier</button>
@@ -403,25 +470,142 @@ function App(){
                 </tbody>
               </table>
             </div>
-            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>▸ Cliquez sur une ligne pour afficher les prix cibles et marges de sécurité</div>
+            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>▸ Cliquez sur une ligne pour afficher les prix cibles</div>
           </div>
         )}
 
-        {/* ALLOCATION */}
+        {/* ── WATCHLIST ── */}
+        {tab==='watchlist'&&(
+          <div>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+              <div>
+                <div style={{fontWeight:700,fontSize:16}}>Watchlist</div>
+                <div style={{fontSize:12,color:'#9CA3AF',marginTop:2}}>Triée par attractivité décroissante — marge vs PC1</div>
+              </div>
+              <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>setWlAdding(!wlAdding)}>
+                {wlAdding?'✕ Annuler':'+ Ajouter'}
+              </button>
+            </div>
+
+            {wlAdding&&(
+              <div style={{...s.card,marginBottom:16}}>
+                <div style={{fontWeight:600,marginBottom:12,color:'#6B7280',fontSize:13}}>Nouveau titre en watchlist</div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:12}}>
+                  {[{k:'ticker',l:'Ticker Yahoo',t:'text'},{k:'name',l:'Nom',t:'text'},{k:'pc1',l:'Prix Cible 1',t:'number'},{k:'mos',l:'MoS requise %',t:'number'}].map(({k,l,t})=>(
+                    <div key={k}><label style={s.lbl}>{l}</label>
+                      <input style={s.inp} type={t} value={wlForm[k]??''} onChange={e=>setWlForm(f=>({...f,[k]:t==='number'?parseFloat(e.target.value)||0:e.target.value}))}/>
+                    </div>
+                  ))}
+                </div>
+                <div style={{display:'flex',gap:8,marginTop:14}}>
+                  <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={addWl}>+ Ajouter</button>
+                  <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280'}} onClick={()=>setWlAdding(false)}>Annuler</button>
+                </div>
+              </div>
+            )}
+
+            <div style={{overflowX:'auto',borderRadius:12,border:'1px solid #EEEDE9',background:'#FFFFFF'}}>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                <thead>
+                  <tr style={{background:'#FAFAF8'}}>
+                    <th style={{...s.th,width:36}}>#</th>
+                    <th style={s.th}>Titre</th>
+                    <th style={s.th}>Type</th>
+                    <th style={s.th}>Cours</th>
+                    <th style={s.th}>PC1</th>
+                    <th style={s.th}>Marge PC1 ↓</th>
+                    <th style={s.th}>PC2</th>
+                    <th style={s.th}>Marge PC2</th>
+                    <th style={s.th}>PC3</th>
+                    <th style={s.th}>Marge PC3</th>
+                    <th style={s.th}>MoS req.</th>
+                    <th style={s.th}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {wlMerged.length===0&&(
+                    <tr><td colSpan={12} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>
+                      Aucun titre — renseignez PC1 dans vos positions ou ajoutez des titres en watchlist
+                    </td></tr>
+                  )}
+                  {wlMerged.map((p,idx)=>{
+                    const px=prices[p.ticker];
+                    const cours=px?.p??null, cur=px?.c??'';
+                    const pc2=p.pc1>0?p.pc1*(1-p.mos/200):0;
+                    const pc3=p.pc1>0?p.pc1*(1-p.mos/100):0;
+                    const mos1=cours&&p.pc1?((p.pc1-cours)/p.pc1)*100:null;
+                    const mos2=cours&&pc2?((pc2-cours)/pc2)*100:null;
+                    const mos3=cours&&pc3?((pc3-cours)/pc3)*100:null;
+                    const isPortfolio=p.wlType==='portfolio';
+                    const rowBg=mos1!=null&&mos1>=15?'#F0FDF4':mos1!=null&&mos1>=0?'#FFFBEB':mos1!=null?'#FEF2F2':'transparent';
+                    return(
+                      <tr key={p.ticker} style={{background:rowBg}}
+                        onMouseEnter={e=>e.currentTarget.style.filter='brightness(0.97)'}
+                        onMouseLeave={e=>e.currentTarget.style.filter=''}>
+                        <td style={{...s.td,color:'#9CA3AF',fontWeight:700,fontSize:13}}>{idx+1}</td>
+                        <td style={s.td}>
+                          <div style={{fontWeight:600}}>{p.ticker}</div>
+                          <div style={{fontSize:11,color:'#9CA3AF'}}>{p.name}</div>
+                        </td>
+                        <td style={s.td}>
+                          {isPortfolio
+                            ? <Badge text={p.env||'Portfolio'} color={ENV_CLR[p.env]||'#6B7280'}/>
+                            : <Badge text="Watch" color="#9CA3AF"/>}
+                        </td>
+                        <td style={s.td}>
+                          <span style={{fontWeight:600}}>{cours?fmt(cours):'—'}</span>
+                          {cur&&<span style={{fontSize:10,color:'#9CA3AF',marginLeft:3}}>{cur}</span>}
+                        </td>
+                        {[[p.pc1,mos1],[pc2,mos2],[pc3,mos3]].map(([pc,mos],i)=>(
+                          <Fragment key={i}>
+                            <td style={s.td}>
+                              <span style={{fontWeight:600,color:pc>0?'#191919':'#D1D5DB'}}>{pc>0?fmt(pc):'—'}</span>
+                            </td>
+                            <td style={s.td}>
+                              <span style={{fontWeight:700,color:mosClr(mos),fontSize:13}}>
+                                {mos==null?'—':(mos>=0?'+':'')+fmt(mos)+'%'}
+                              </span>
+                              {mos!=null&&(
+                                <div style={{marginTop:3,height:3,background:'#EEEDE9',borderRadius:2,width:60}}>
+                                  <div style={{width:Math.min(Math.abs(mos),100)+'%',height:'100%',background:mosClr(mos),borderRadius:2}}/>
+                                </div>
+                              )}
+                            </td>
+                          </Fragment>
+                        ))}
+                        <td style={{...s.td,color:'#6B7280'}}>{p.mos}%</td>
+                        <td style={s.td}>
+                          {!isPortfolio&&(
+                            <button style={{...s.btn,background:'#FEE2E2',color:'#DC2626',padding:'3px 8px',fontSize:11}} onClick={()=>delWl(p.id)}>🗑️</button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>
+              🟢 Marge &gt; 15% — 🟡 Marge 0-15% — 🔴 Cours au-dessus du PC1
+            </div>
+          </div>
+        )}
+
+        {/* ── ALLOCATION ── */}
         {tab==='allocation'&&(
           <div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
-              {[{title:'Par enveloppe',data:byEnv,clr:ENV_CLR},{title:'Par catégorie',data:byCat,clr:CAT_CLR}].map(({title,data,clr})=>(
+              {[{title:'Par enveloppe (€)',data:byEnv,clr:ENV_CLR},{title:'Par catégorie (€)',data:byCat,clr:CAT_CLR}].map(({title,data,clr})=>(
                 <div key={title} style={s.card}>
-                  <div style={{fontWeight:700,marginBottom:16,color:'#191919'}}>{title}</div>
+                  <div style={{fontWeight:700,marginBottom:16}}>{title}</div>
                   <div style={{display:'flex',alignItems:'center',gap:20,flexWrap:'wrap'}}>
                     <PieChart data={data} colorMap={clr}/>
                     <div style={{display:'flex',flexDirection:'column',gap:8}}>
                       {data.map(d=>(
-                        <div key={d.name} style={{display:'flex',alignItems:'center',gap:8,fontSize:13}}>
+                        <div key={d.name} style={{display:'flex',alignItems:'center',gap:8}}>
                           <div style={{width:10,height:10,borderRadius:2,background:clr[d.name],flexShrink:0}}/>
                           <span style={{color:'#6B7280',fontSize:12}}>{d.name}</span>
-                          <span style={{fontWeight:700,color:'#191919'}}>{Math.round(d.value/data.reduce((s,x)=>s+x.value,0)*100)}%</span>
+                          <span style={{fontWeight:700}}>{Math.round(d.value/data.reduce((s,x)=>s+x.value,0)*100)}%</span>
                         </div>
                       ))}
                     </div>
@@ -430,27 +614,34 @@ function App(){
               ))}
             </div>
             <div style={s.card}>
-              <div style={{fontWeight:700,marginBottom:12,color:'#191919'}}>Pondérations par position</div>
+              <div style={{fontWeight:700,marginBottom:12}}>Pondérations par titre (toutes enveloppes, en €)</div>
               <div style={{overflowX:'auto'}}>
                 <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
                   <thead><tr>
-                    <th style={s.th}>Ticker</th><th style={s.th}>Catégorie</th><th style={s.th}>Env.</th>
-                    <th style={s.th}>Valeur</th><th style={{...s.th,minWidth:180}}>Poids</th>
+                    <th style={s.th}>Ticker</th><th style={s.th}>Catégorie</th>
+                    <th style={s.th}>Enveloppes</th><th style={s.th}>Valeur €</th>
+                    <th style={{...s.th,minWidth:180}}>Poids</th>
                   </tr></thead>
                   <tbody>
-                    {posRanked.map(p=>(
-                      <tr key={p.id} onMouseEnter={e=>e.currentTarget.style.background='#FAFAF8'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                    {posRankedEUR.map(p=>(
+                      <tr key={p.ticker}
+                        onMouseEnter={e=>e.currentTarget.style.background='#FAFAF8'}
+                        onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                         <td style={s.td}><strong>{p.ticker}</strong> <span style={{fontSize:11,color:'#9CA3AF'}}>{p.name}</span></td>
                         <td style={s.td}><span style={{color:CAT_CLR[p.cat],fontSize:12,fontWeight:600}}>{p.cat}</span></td>
-                        <td style={s.td}><Badge text={p.env} color={ENV_CLR[p.env]}/></td>
-                        <td style={s.td}>{p.val?fmt(p.val,0)+' '+p.cur:'—'}</td>
                         <td style={s.td}>
-                          {totalVal>0&&p.val?(
+                          <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+                            {p.envs.map(e=><Badge key={e} text={e} color={ENV_CLR[e]}/>)}
+                          </div>
+                        </td>
+                        <td style={s.td}>{p.valEUR>0?fmtEUR(p.valEUR):'—'}</td>
+                        <td style={s.td}>
+                          {totalEUR>0&&p.valEUR>0?(
                             <div style={{display:'flex',alignItems:'center',gap:8}}>
                               <div style={{flex:1,height:6,background:'#F0EFE9',borderRadius:3}}>
-                                <div style={{width:Math.min((p.val/totalVal)*100,100)+'%',height:'100%',background:CAT_CLR[p.cat],borderRadius:3}}/>
+                                <div style={{width:Math.min((p.valEUR/totalEUR)*100,100)+'%',height:'100%',background:CAT_CLR[p.cat],borderRadius:3}}/>
                               </div>
-                              <span style={{minWidth:38,textAlign:'right',fontSize:12,color:'#6B7280'}}>{fmt((p.val/totalVal)*100,1)}%</span>
+                              <span style={{minWidth:38,textAlign:'right',fontSize:12,color:'#6B7280'}}>{fmt((p.valEUR/totalEUR)*100,1)}%</span>
                             </div>
                           ):<span style={{color:'#D1D5DB'}}>—</span>}
                         </td>
@@ -463,17 +654,17 @@ function App(){
           </div>
         )}
 
-        {/* ÉDITEUR */}
+        {/* ── ÉDITEUR ── */}
         {tab==='editeur'&&(
           <div>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-              <div style={{fontWeight:700,fontSize:16,color:'#191919'}}>Positions</div>
+              <div style={{fontWeight:700,fontSize:16}}>Positions</div>
               {!addNew&&<button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>{setAddNew(true);setEditId(null);}}>+ Ajouter</button>}
             </div>
             {addNew&&(
               <div style={{...s.card,marginBottom:16}}>
                 <div style={{fontWeight:600,marginBottom:12,color:'#6B7280',fontSize:13}}>Nouvelle position</div>
-                <PosForm isNew init={{ticker:'',name:'',env:'CTO',cat:'Core Quality',qte:0,pru:0,pc1:0,mos:30}} s={s} onSave={addPos} onCancel={()=>setAddNew(false)}/>
+                <PosForm isNew init={{ticker:'',name:'',env:'CTO',cat:'Core Quality',qte:0,pru:0,pc1:0,mos:30}} onSave={addPos} onCancel={()=>setAddNew(false)}/>
               </div>
             )}
             <div style={s.card}>
@@ -488,12 +679,12 @@ function App(){
                       <Fragment key={p.id}>
                         {editId===p.id?(
                           <tr><td colSpan={9} style={{padding:16,background:'#FAFAF8'}}>
-                            <PosForm init={p} s={s} onSave={updPos} onCancel={()=>setEditId(null)}/>
+                            <PosForm init={p} onSave={updPos} onCancel={()=>setEditId(null)}/>
                           </td></tr>
                         ):delId===p.id?(
                           <tr style={{background:'#FEF2F2'}}>
                             <td colSpan={9} style={{...s.td,padding:'12px 16px'}}>
-                              <span style={{color:'#DC2626'}}>Supprimer <strong>{p.ticker}</strong> ?</span>
+                              <span style={{color:'#DC2626'}}>Supprimer <strong>{p.ticker}</strong> ({p.env}) ?</span>
                               <button style={{...s.btn,background:'#DC2626',color:'#fff',marginLeft:14,padding:'3px 12px',fontSize:12}} onClick={()=>delPos(p.id)}>Confirmer</button>
                               <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',marginLeft:6,padding:'3px 12px',fontSize:12}} onClick={()=>setDelId(null)}>Annuler</button>
                             </td>
