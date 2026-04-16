@@ -3,34 +3,31 @@ export default async function handler(req, res) {
   const { symbols } = req.query;
   if (!symbols) return res.status(400).json({ error: 'No symbols' });
 
-  const HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.9',
-  };
+  const tickers = symbols.split(',').map(s => s.trim()).filter(Boolean);
 
-  try {
-    // Étape 1 : récupérer le cookie de session
-    const cookieRes = await fetch('https://fc.yahoo.com', { headers: HEADERS });
-    const rawCookies = cookieRes.headers.get('set-cookie') || '';
-    const cookie = rawCookies.split(',').map(c => c.split(';')[0].trim()).join('; ');
+  const results = await Promise.all(tickers.map(async ticker => {
+    try {
+      const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`;
+      const r = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+          'Accept': 'application/json',
+          'Referer': 'https://finance.yahoo.com',
+        }
+      });
+      const data = await r.json();
+      const meta = data?.chart?.result?.[0]?.meta;
+      if (!meta?.regularMarketPrice) return null;
+      return {
+        symbol: ticker,
+        regularMarketPrice: meta.regularMarketPrice,
+        currency: meta.currency,
+        regularMarketTime: meta.regularMarketTime,
+      };
+    } catch { return null; }
+  }));
 
-    // Étape 2 : récupérer le crumb
-    const crumbRes = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', {
-      headers: { ...HEADERS, 'Cookie': cookie }
-    });
-    const crumb = await crumbRes.text();
-    if (!crumb || crumb.includes('<')) throw new Error('Crumb invalide');
-
-    // Étape 3 : récupérer les cotations
-    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols)}&crumb=${encodeURIComponent(crumb)}`;
-    const quoteRes = await fetch(url, {
-      headers: { ...HEADERS, 'Cookie': cookie }
-    });
-    const data = await quoteRes.json();
-    res.json(data);
-
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  res.json({
+    quoteResponse: { result: results.filter(Boolean) }
+  });
 }
