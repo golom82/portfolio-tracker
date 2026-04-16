@@ -24,43 +24,41 @@
 <div id="root"></div>
 <script type="text/babel">
 // ═══════════════════════════════════════════════════════════════
-// CONFIGURATION — remplacez ces 3 valeurs par les vôtres
+// CONFIGURATION — remplacez ces 2 valeurs par les vôtres
 // ═══════════════════════════════════════════════════════════════
-const SUPABASE_URL      = 'https://mtrvcgicwcraqjxknoid.supabase.co';       // ex: https://abcxyz.supabase.co
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im10cnZjZ2ljd2NyYXFqeGtub2lkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzk4NDksImV4cCI6MjA5MTkxNTg0OX0.F78OxlzPOIxpMhXkCFSA9Y96cJUUVpe6mw3S3aM6XJA';  // commence par eyJ...
-const FINNHUB_KEY       = 'd7gckt1r01qqb8rj5d60d7gckt1r01qqb8rj5d6g';         // votre clé Finnhub
+const SUPABASE_URL      = 'https://mtrvcgicwcraqjxknoid.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im10cnZjZ2ljd2NyYXFqeGtub2lkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzk4NDksImV4cCI6MjA5MTkxNTg0OX0.F78OxlzPOIxpMhXkCFSA9Y96cJUUVpe6mw3S3aM6XJA';
 // ═══════════════════════════════════════════════════════════════
 
 const { createClient } = supabase;
 const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const { useState, useEffect, Fragment } = React;
 
-// ── Constantes ─────────────────────────────────────────────────
 const CATS    = ['Core Quality','Quality Aggressive','Speculative'];
 const ENVS    = ['PEA','CTO','PER'];
 const CAT_CLR = {'Core Quality':'#60a5fa','Quality Aggressive':'#a78bfa','Speculative':'#fbbf24'};
 const ENV_CLR = {PEA:'#34d399',CTO:'#60a5fa',PER:'#fb923c'};
 
 const SEED = [
-  {ticker:'MSCI',      fticker:'MSCI',          name:'MSCI Inc.',              env:'CTO',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'SPGI',      fticker:'SPGI',          name:'S&P Global',             env:'CTO',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'CSU.TO',    fticker:'TSX:CSU',       name:'Constellation Software', env:'CTO',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'MSFT',      fticker:'MSFT',          name:'Microsoft',              env:'CTO',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'RACE',      fticker:'RACE',          name:'Ferrari',                env:'PEA',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:25},
-  {ticker:'NOVO-B.CO', fticker:'CPSE:NOVO_B',   name:'Novo Nordisk',           env:'PEA',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'ASML',      fticker:'ASML',          name:'ASML',                   env:'PEA',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'ASM.AS',    fticker:'AMS:ASM',       name:'ASM International',      env:'PEA',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'TSM',       fticker:'TSM',           name:'TSMC',                   env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'GOOGL',     fticker:'GOOGL',         name:'Alphabet',               env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'AMZN',      fticker:'AMZN',          name:'Amazon',                 env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'META',      fticker:'META',          name:'Meta',                   env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'NFLX',      fticker:'NFLX',          name:'Netflix',                env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'ADYEN.AS',  fticker:'AMS:ADYEN',     name:'Adyen',                  env:'PEA',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'BKNG',      fticker:'BKNG',          name:'Booking Holdings',       env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'TTD',       fticker:'TTD',           name:'The Trade Desk',         env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:35},
-  {ticker:'UBER',      fticker:'UBER',          name:'Uber',                   env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:35},
-  {ticker:'MELI',      fticker:'MELI',          name:'MercadoLibre',           env:'CTO',cat:'Speculative',       qte:0,pru:0,pc1:0,mos:35},
-  {ticker:'NEU.PA',    fticker:'EURONEXT:NEU',  name:'Neurone',                env:'PEA',cat:'Speculative',       qte:0,pru:0,pc1:0,mos:35},
+  {ticker:'MSCI',      name:'MSCI Inc.',              env:'CTO',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'SPGI',      name:'S&P Global',             env:'CTO',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'CSU.TO',    name:'Constellation Software', env:'CTO',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'MSFT',      name:'Microsoft',              env:'CTO',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'RACE.MI',   name:'Ferrari',                env:'PEA',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:25},
+  {ticker:'NOVO-B.CO', name:'Novo Nordisk',           env:'PEA',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'ASML',      name:'ASML',                   env:'PEA',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'ASM.AS',    name:'ASM International',      env:'PEA',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'TSM',       name:'TSMC',                   env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'GOOGL',     name:'Alphabet',               env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'AMZN',      name:'Amazon',                 env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'META',      name:'Meta',                   env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'NFLX',      name:'Netflix',                env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'ADYEN.AS',  name:'Adyen',                  env:'PEA',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'BKNG',      name:'Booking Holdings',       env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
+  {ticker:'TTD',       name:'The Trade Desk',         env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:35},
+  {ticker:'UBER',      name:'Uber',                   env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:35},
+  {ticker:'MELI',      name:'MercadoLibre',           env:'CTO',cat:'Speculative',       qte:0,pru:0,pc1:0,mos:35},
+  {ticker:'NEU.PA',    name:'Neurone',                env:'PEA',cat:'Speculative',       qte:0,pru:0,pc1:0,mos:35},
 ];
 
 // ── Utilitaires ────────────────────────────────────────────────
@@ -69,7 +67,7 @@ const fmtS = (n,c='') => n==null?'—':(n>=0?'+':'')+fmt(n,0)+(c?' '+c:'');
 const pClr = n => n==null?'#64748b':n>=0?'#34d399':'#f87171';
 
 function calcPos(p,prices){
-  const px=prices[p.ticker], cours=px?.p??null, cur=px?.c??'';
+  const px=prices[p.ticker],cours=px?.p??null,cur=px?.c??'';
   const pc2=p.pc1>0?p.pc1*(1-p.mos/200):0;
   const pc3=p.pc1>0?p.pc1*(1-p.mos/100):0;
   const pl_pct=cours&&p.pru?((cours-p.pru)/p.pru)*100:null;
@@ -81,23 +79,24 @@ function calcPos(p,prices){
   return {cours,cur,pc2,pc3,pl_pct,pl_abs,mos1,mos2,mos3,val};
 }
 
-// ── Finnhub ────────────────────────────────────────────────────
+// ── Yahoo Finance via fonction serverless ──────────────────────
 async function fetchPrices(positions){
-  const results=await Promise.all(positions.map(async p=>{
-    try{
-      const sym=p.fticker||p.ticker;
-      const r=await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(sym)}&token=${FINNHUB_KEY}`);
-      const d=await r.json();
-      if(d?.c>0){
-        const cur=p.ticker.endsWith('.PA')||p.ticker.endsWith('.AS')?'EUR':p.ticker.endsWith('.CO')?'DKK':p.ticker.endsWith('.TO')?'CAD':'USD';
-        const date=d.t?new Date(d.t*1000).toLocaleDateString('fr-FR'):null;
-        return [p.ticker,{p:d.c,c:cur,d:date}];
-      }
-    }catch{}
-    return null;
-  }));
+  const BATCH=10;
   const px={};
-  results.filter(Boolean).forEach(([t,v])=>{px[t]=v;});
+  for(let i=0;i<positions.length;i+=BATCH){
+    const batch=positions.slice(i,i+BATCH);
+    const symbols=batch.map(p=>p.ticker).join(',');
+    try{
+      const r=await fetch(`/api/prices?symbols=${encodeURIComponent(symbols)}`);
+      const d=await r.json();
+      (d.quoteResponse?.result||[]).forEach(q=>{
+        const date=q.regularMarketTime
+          ?new Date(q.regularMarketTime*1000).toLocaleDateString('fr-FR')
+          :null;
+        px[q.symbol]={p:q.regularMarketPrice,c:q.currency,d:date};
+      });
+    }catch{}
+  }
   return px;
 }
 
@@ -109,7 +108,7 @@ function PieChart({data,colorMap,size=180}){
   const R=80,cx=100,cy=100;
   const slices=data.map(d=>{
     const angle=(d.value/total)*2*Math.PI;
-    const a1=cum,a2=cum+angle; cum=a2;
+    const a1=cum,a2=cum+angle;cum=a2;
     return{...d,x1:cx+R*Math.cos(a1),y1:cy+R*Math.sin(a1),x2:cx+R*Math.cos(a2),y2:cy+R*Math.sin(a2),
       large:angle>Math.PI?1:0,mx:cx+(R*.65)*Math.cos((a1+a2)/2),my:cy+(R*.65)*Math.sin((a1+a2)/2),
       pct:Math.round(d.value/total*100),color:colorMap[d.name]||'#60a5fa'};
@@ -132,7 +131,6 @@ function PieChart({data,colorMap,size=180}){
 function Badge({text,color}){
   return <span style={{display:'inline-block',padding:'2px 8px',borderRadius:4,fontSize:11,fontWeight:600,background:color+'22',color}}>{text}</span>;
 }
-
 function MosBar({label,value}){
   const clr=pClr(value);
   return(
@@ -147,7 +145,6 @@ function MosBar({label,value}){
     </div>
   );
 }
-
 function PcCard({label,pc,mos,cur}){
   const has=pc>0;
   const bClr=!has?'#1e293b':mos==null?'#334155':mos>=0?'#34d39940':'#f8717140';
@@ -163,13 +160,12 @@ function PcCard({label,pc,mos,cur}){
 }
 
 const FIELDS=[
-  {k:'ticker', l:'Ticker (affichage)',t:'text'},
-  {k:'fticker',l:'Ticker Finnhub',   t:'text'},
-  {k:'name',   l:'Nom',              t:'text'},
-  {k:'qte',    l:'Quantité',         t:'number'},
-  {k:'pru',    l:'PRU',              t:'number'},
-  {k:'pc1',    l:'Prix Cible 1',     t:'number'},
-  {k:'mos',    l:'MoS requise %',    t:'number'},
+  {k:'ticker',l:'Ticker Yahoo',t:'text'},
+  {k:'name',  l:'Nom',         t:'text'},
+  {k:'qte',   l:'Quantité',    t:'number'},
+  {k:'pru',   l:'PRU',         t:'number'},
+  {k:'pc1',   l:'Prix Cible 1',t:'number'},
+  {k:'mos',   l:'MoS requise %',t:'number'},
 ];
 
 function PosForm({init,onSave,onCancel,s,isNew=false}){
@@ -203,7 +199,7 @@ function PosForm({init,onSave,onCancel,s,isNew=false}){
   );
 }
 
-// ── Application principale ─────────────────────────────────────
+// ── App ────────────────────────────────────────────────────────
 function App(){
   const [pos,      setPos]      = useState([]);
   const [prices,   setPrices]   = useState({});
@@ -239,8 +235,8 @@ function App(){
     try{
       const px=await fetchPrices(positions||pos);
       if(Object.keys(px).length>0){setPrices(px);setLastUpd(new Date());}
-      else setError('Finnhub : aucun cours. Vérifiez la clé et les tickers Finnhub.');
-    }catch(e){setError('Finnhub : '+e.message);}
+      else setError('Yahoo Finance : aucun cours récupéré.');
+    }catch(e){setError('Erreur : '+e.message);}
     setFetching(false);
   }
 
@@ -293,7 +289,7 @@ function App(){
           <div style={{fontSize:19,fontWeight:800,color:'#f1f5f9'}}>📊 Portfolio Tracker</div>
           <div style={{fontSize:12,color:'#475569',marginTop:2}}>
             {lastUpd?`Actualisé le ${lastUpd.toLocaleDateString('fr-FR')} à ${lastUpd.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}`:'—'}
-            {fetching&&<span style={{color:'#3b82f6',marginLeft:8}}>⟳ Finnhub...</span>}
+            {fetching&&<span style={{color:'#3b82f6',marginLeft:8}}>⟳ Yahoo Finance...</span>}
           </div>
         </div>
         <div style={{display:'flex',gap:8,alignItems:'center'}}>
@@ -326,7 +322,7 @@ function App(){
 
       <div style={{padding:20}}>
 
-        {/* ── PORTEFEUILLE ── */}
+        {/* PORTEFEUILLE */}
         {tab==='portfolio'&&(
           <div>
             <div style={{display:'flex',gap:6,marginBottom:16,flexWrap:'wrap',alignItems:'center'}}>
@@ -364,7 +360,7 @@ function App(){
                       <tr><td colSpan={9} style={{padding:'7px 14px',background:'#1e293b',fontSize:11,fontWeight:700,color:CAT_CLR[cat],textTransform:'uppercase',letterSpacing:'0.08em'}}>▪ {cat}</td></tr>
                       {items.map(p=>{
                         const {cours,cur,pc2,pc3,pl_pct,pl_abs,mos1,mos2,mos3,val}=calcPos(p,prices);
-                        const isExp=expanded.has(p.id), px=prices[p.ticker];
+                        const isExp=expanded.has(p.id),px=prices[p.ticker];
                         return(
                           <Fragment key={p.id}>
                             <tr onClick={()=>toggle(p.id)} style={{cursor:'pointer'}}
@@ -414,7 +410,7 @@ function App(){
           </div>
         )}
 
-        {/* ── ALLOCATION ── */}
+        {/* ALLOCATION */}
         {tab==='allocation'&&(
           <div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
@@ -470,7 +466,7 @@ function App(){
           </div>
         )}
 
-        {/* ── ÉDITEUR ── */}
+        {/* ÉDITEUR */}
         {tab==='editeur'&&(
           <div>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
@@ -480,13 +476,9 @@ function App(){
             {addNew&&(
               <div style={{...s.card,marginBottom:16}}>
                 <div style={{fontWeight:600,marginBottom:12,color:'#94a3b8',fontSize:13}}>Nouvelle position</div>
-                <PosForm isNew init={{ticker:'',fticker:'',name:'',env:'CTO',cat:'Core Quality',qte:0,pru:0,pc1:0,mos:30}} s={s} onSave={addPos} onCancel={()=>setAddNew(false)}/>
+                <PosForm isNew init={{ticker:'',name:'',env:'CTO',cat:'Core Quality',qte:0,pru:0,pc1:0,mos:30}} s={s} onSave={addPos} onCancel={()=>setAddNew(false)}/>
               </div>
             )}
-            <div style={{...s.card,marginBottom:12,padding:'10px 14px',background:'#0c1322',border:'1px solid #1e293b',fontSize:12,color:'#64748b'}}>
-              💡 <strong style={{color:'#94a3b8'}}>Ticker Finnhub</strong> : pour les actions non-US, le format diffère du ticker Yahoo.
-              Exemples : <code>TSX:CSU</code>, <code>EURONEXT:NEU</code>, <code>AMS:ADYEN</code>, <code>CPSE:NOVO_B</code>.
-            </div>
             <div style={s.card}>
               <div style={{overflowX:'auto'}}>
                 <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
