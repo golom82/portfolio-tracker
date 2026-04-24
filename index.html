@@ -25,8 +25,8 @@
 // ═══════════════════════════════════════════════════════
 // CONFIGURATION
 // ═══════════════════════════════════════════════════════
-const SUPABASE_URL      = 'https://mtrvcgicwcraqjxknoid.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im10cnZjZ2ljd2NyYXFqeGtub2lkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzk4NDksImV4cCI6MjA5MTkxNTg0OX0.F78OxlzPOIxpMhXkCFSA9Y96cJUUVpe6mw3S3aM6XJA';
+const SUPABASE_URL      = 'VOTRE_SUPABASE_URL';
+const SUPABASE_ANON_KEY = 'VOTRE_SUPABASE_ANON_KEY';
 // ═══════════════════════════════════════════════════════
 
 const { createClient } = supabase;
@@ -85,6 +85,8 @@ function App(){
   const [fCat,      setFCat]     = useState('ALL');
   const [wlForm,    setWlForm]   = useState({ticker:'',name:'',pc1:0,mos:30});
   const [wlAdding,  setWlAdding] = useState(false);
+  const [wlEditId,  setWlEditId] = useState(null);
+  const [wlEditForm,setWlEditForm]=useState({});
 
   // FX conversion
   const toEUR = (amount, currency) => {
@@ -187,6 +189,10 @@ function App(){
     const {data}=await db.from('watchlist').insert([wlForm]).select();
     if(data){const u=[...wl,...data];setWl(u);doFetch(pos,u);}
     setWlAdding(false);setWlForm({ticker:'',name:'',pc1:0,mos:30});
+  }
+  async function updWl(f){
+    await db.from('watchlist').update(f).eq('id',f.id);
+    const u=wl.map(x=>x.id===f.id?f:x);setWl(u);setWlEditId(null);doFetch(pos,u);
   }
   async function delWl(id){
     await db.from('watchlist').delete().eq('id',id);
@@ -576,7 +582,12 @@ function App(){
                         <td style={{...s.td,color:'#6B7280'}}>{p.mos}%</td>
                         <td style={s.td}>
                           {!isPortfolio&&(
-                            <button style={{...s.btn,background:'#FEE2E2',color:'#DC2626',padding:'3px 8px',fontSize:11}} onClick={()=>delWl(p.id)}>🗑️</button>
+                            <div style={{display:'flex',gap:4}}>
+                              <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 8px',fontSize:11}}
+                                onClick={()=>{setWlEditId(p.id);setWlEditForm({...p});}}>✏️</button>
+                              <button style={{...s.btn,background:'#FEE2E2',color:'#DC2626',padding:'3px 8px',fontSize:11}}
+                                onClick={()=>delWl(p.id)}>🗑️</button>
+                            </div>
                           )}
                         </td>
                       </tr>
