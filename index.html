@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -493,7 +494,23 @@ function App(){
               </button>
             </div>
 
-            {wlAdding&&(
+            {wlEditId&&(
+              <div style={{...s.card,marginBottom:16,borderLeft:'3px solid #CF6D56'}}>
+                <div style={{fontWeight:600,marginBottom:12,color:'#6B7280',fontSize:13}}>Modifier le titre</div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:12}}>
+                  {[{k:'ticker',l:'Ticker Yahoo',t:'text'},{k:'name',l:'Nom',t:'text'},{k:'pc1',l:'Prix Cible 1',t:'number'},{k:'mos',l:'MoS requise %',t:'number'}].map(({k,l,t})=>(
+                    <div key={k}><label style={s.lbl}>{l}</label>
+                      <input style={s.inp} type={t} value={wlEditForm[k]??''}
+                        onChange={e=>setWlEditForm(f=>({...f,[k]:t==='number'?parseFloat(e.target.value)||0:e.target.value}))}/>
+                    </div>
+                  ))}
+                </div>
+                <div style={{display:'flex',gap:8,marginTop:14}}>
+                  <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>updWl(wlEditForm)}>✓ Sauvegarder</button>
+                  <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280'}} onClick={()=>setWlEditId(null)}>Annuler</button>
+                </div>
+              </div>
+            )}
               <div style={{...s.card,marginBottom:16}}>
                 <div style={{fontWeight:600,marginBottom:12,color:'#6B7280',fontSize:13}}>Nouveau titre en watchlist</div>
                 <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:12}}>
