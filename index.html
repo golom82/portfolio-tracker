@@ -28,17 +28,17 @@
 const SUPABASE_URL      = 'https://mtrvcgicwcraqjxknoid.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im10cnZjZ2ljd2NyYXFqeGtub2lkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzk4NDksImV4cCI6MjA5MTkxNTg0OX0.F78OxlzPOIxpMhXkCFSA9Y96cJUUVpe6mw3S3aM6XJA';
 // ═══════════════════════════════════════════════════════
- 
+
 const { createClient } = supabase;
 const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const { useState, useEffect, Fragment } = React;
- 
+
 const CATS    = ['Défensif','Quality Core','Quality Satellite','Outsider'];
 const ENVS    = ['PEA','CTO','PER'];
 const CAT_CLR = {'Défensif':'#0D9488','Quality Core':'#2563EB','Quality Satellite':'#7C3AED','Outsider':'#D97706'};
 const ENV_CLR = {PEA:'#059669',CTO:'#2563EB',PER:'#EA580C'};
 const FX_TICKERS = ['EURUSD=X','EURCAD=X','EURDKK=X'];
- 
+
 // Seed — catégories migrées vers le nouveau schéma. Mouvements vides : à renseigner via l'éditeur.
 const SEED = [
   {ticker:'MSCI',     name:'MSCI Inc.',              env:'CTO',cat:'Quality Core',     pc1:0,mos:30,mouvements:[]},
@@ -61,11 +61,15 @@ const SEED = [
   {ticker:'MELI',     name:'MercadoLibre',           env:'CTO',cat:'Outsider',         pc1:0,mos:35,mouvements:[]},
   {ticker:'NEU.PA',   name:'Neurone',                env:'PEA',cat:'Outsider',         pc1:0,mos:35,mouvements:[]},
 ];
- 
+
 const fmt    = (n,d=2) => n==null?'—':Number(n).toLocaleString('fr-FR',{minimumFractionDigits:d,maximumFractionDigits:d});
 const fmtEUR = (n) => n==null?'—':fmt(n,0)+' €';
+// Parse un nombre saisi à la française (virgule décimale, espaces) → Number
+const num    = v => { const f=parseFloat(String(v??'').replace(/\s/g,'').replace(',','.')); return isNaN(f)?0:f; };
+// Quantité : jusqu'à 4 décimales, sans zéros superflus (fractions d'action)
+const fmtQte = n => n==null?'—':Number(n).toLocaleString('fr-FR',{maximumFractionDigits:4});
 const mosClr = n => n==null?'#9CA3AF':n>=15?'#16A34A':n>=0?'#D97706':'#DC2626';
- 
+
 // Mois pleins (échus) écoulés depuis une date 'YYYY-MM-DD'
 function monthsElapsed(dateStr){
   if(!dateStr) return null;
@@ -77,11 +81,11 @@ function monthsElapsed(dateStr){
   return m<0?0:m;
 }
 const fmtDate = s => s ? new Date(s+'T00:00:00').toLocaleDateString('fr-FR') : '—';
- 
+
 function Badge({text,color}){
   return <span style={{display:'inline-block',padding:'2px 7px',borderRadius:4,fontSize:11,fontWeight:600,background:color+'18',color}}>{text}</span>;
 }
- 
+
 function MosBar({value,label}){
   const clr=mosClr(value);
   return(
@@ -96,7 +100,7 @@ function MosBar({value,label}){
     </div>
   );
 }
- 
+
 function PcCard({label,pc,mos,cur}){
   const has=pc>0;
   const bg=!has?'#FAFAF8':mos>=0?'#F0FDF4':'#FEF2F2';
@@ -111,7 +115,7 @@ function PcCard({label,pc,mos,cur}){
     </div>
   );
 }
- 
+
 function PieChart({data,colorMap,size=170}){
   const total=data.reduce((s,d)=>s+d.value,0);
   if(!total) return <div style={{color:'#9CA3AF',textAlign:'center',padding:20,fontSize:12}}>Renseignez les mouvements</div>;
@@ -133,10 +137,10 @@ function PieChart({data,colorMap,size=170}){
     </svg>
   );
 }
- 
+
 // Palette pour distinguer des titres de même catégorie dans les camemberts par titre
 const sliceColor = i => `hsl(${(i*53)%360} 58% 56%)`;
- 
+
 // ── Recherche de ticker Yahoo Finance (via /api/search serverless) ──
 function TickerSearch({onPick}){
   const [q,setQ]=useState('');
@@ -182,26 +186,34 @@ function TickerSearch({onPick}){
     </div>
   );
 }
- 
+
 // ── Éditeur de mouvements (achats / ventes) ──
 function MovementsEditor({value,onChange,s}){
   const mv=Array.isArray(value)?value:[];
   const set=(i,k,v)=>{const n=mv.map((m,j)=>j===i?{...m,[k]:v}:m);onChange(n);};
-  const add=()=>onChange([...mv,{date:new Date().toISOString().slice(0,10),type:'achat',qte:0,prix:0}]);
+  const add=()=>onChange([...mv,{date:new Date().toISOString().slice(0,10),type:'achat',qte:'',montant:''}]);
   const rm=i=>onChange(mv.filter((_,j)=>j!==i));
+  const cols='130px 110px 1fr 1fr 32px';
   return(
     <div style={{marginTop:8}}>
       <div style={{fontSize:11,color:'#9CA3AF',marginBottom:6,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.05em'}}>Mouvements</div>
       {mv.length===0&&<div style={{fontSize:12,color:'#D1D5DB',marginBottom:8}}>Aucun mouvement — ajoutez le premier achat.</div>}
+      {mv.length>0&&(
+        <div style={{display:'grid',gridTemplateColumns:cols,gap:6,marginBottom:4}}>
+          {['Date','Sens','Nombre d\u2019actions','Montant total (\u20AC)',''].map((h,i)=>(
+            <div key={i} style={{fontSize:10,color:'#9CA3AF',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.04em'}}>{h}</div>
+          ))}
+        </div>
+      )}
       {mv.map((m,i)=>(
-        <div key={i} style={{display:'grid',gridTemplateColumns:'130px 110px 1fr 1fr 32px',gap:6,marginBottom:6,alignItems:'center'}}>
+        <div key={i} style={{display:'grid',gridTemplateColumns:cols,gap:6,marginBottom:6,alignItems:'center'}}>
           <input style={s.inp} type="date" value={m.date||''} onChange={e=>set(i,'date',e.target.value)}/>
           <select style={{...s.inp,color:m.type==='vente'?'#DC2626':'#16A34A',fontWeight:600}} value={m.type} onChange={e=>set(i,'type',e.target.value)}>
             <option value="achat">Achat</option>
             <option value="vente">Vente</option>
           </select>
-          <input style={s.inp} type="number" placeholder="Qté" value={m.qte??''} onChange={e=>set(i,'qte',parseFloat(e.target.value)||0)}/>
-          <input style={s.inp} type="number" placeholder="Prix (devise native)" value={m.prix??''} onChange={e=>set(i,'prix',parseFloat(e.target.value)||0)}/>
+          <input style={s.inp} type="text" inputMode="decimal" placeholder="ex. 12,5" value={m.qte??''} onChange={e=>set(i,'qte',e.target.value)}/>
+          <input style={s.inp} type="text" inputMode="decimal" placeholder="ex. 1 540,00 €" value={m.montant??''} onChange={e=>set(i,'montant',e.target.value)}/>
           <button style={{...s.btn,background:'#FEE2E2',color:'#DC2626',padding:'4px 0'}} onClick={()=>rm(i)}>✕</button>
         </div>
       ))}
@@ -209,14 +221,14 @@ function MovementsEditor({value,onChange,s}){
     </div>
   );
 }
- 
+
 const POS_TEXT_FIELDS=[{k:'ticker',l:'Ticker Yahoo',t:'text'},{k:'name',l:'Nom',t:'text'}];
 const POS_NUM_FIELDS =[{k:'pc1',l:'Prix Cible 1',t:'number'},{k:'mos',l:'MoS requise %',t:'number'}];
 const WL_FIELDS=[
   {k:'ticker',l:'Ticker Yahoo',t:'text'},{k:'name',l:'Nom',t:'text'},
   {k:'pc1',l:'Prix Cible 1',t:'number'},{k:'mos',l:'MoS requise %',t:'number'},
 ];
- 
+
 function PosForm({init,onSave,onCancel,isNew=false,s}){
   const [f,setF]=useState({mouvements:[],...init});
   const upd=(k,v)=>setF(p=>({...p,[k]:v}));
@@ -256,13 +268,16 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
         <span>Dernier mouvement : <strong style={{color:'#6B7280'}}>{fmtDate(lastMove)}</strong></span>
       </div>
       <div style={{display:'flex',gap:8,marginTop:14}}>
-        <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>onSave(f)}>{isNew?'+ Ajouter':'✓ Sauvegarder'}</button>
+        <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>{
+          const clean={...f,mouvements:(f.mouvements||[]).map(mvt=>({date:mvt.date,type:mvt.type==='vente'?'vente':'achat',qte:num(mvt.qte),montant:num(mvt.montant)}))};
+          onSave(clean);
+        }}>{isNew?'+ Ajouter':'✓ Sauvegarder'}</button>
         <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280'}} onClick={onCancel}>Annuler</button>
       </div>
     </div>
   );
 }
- 
+
 function WlForm({init,onSave,onCancel,s}){
   const [f,setF]=useState({cat:'Quality Core',...init});
   const upd=(k,v)=>setF(p=>({...p,[k]:v}));
@@ -288,7 +303,7 @@ function WlForm({init,onSave,onCancel,s}){
     </div>
   );
 }
- 
+
 function App(){
   const [pos,       setPos]       = useState([]);
   const [wl,        setWl]        = useState([]);
@@ -308,9 +323,9 @@ function App(){
   const [wlAdding,  setWlAdding]  = useState(false);
   const [wlEditId,  setWlEditId]  = useState(null);
   const [hideAmt,   setHideAmt]   = useState(false);     // masquage des montants
- 
+
   const m = v => hideAmt ? '•••' : v;                    // helper de masquage
- 
+
   const toEUR=(amount,currency)=>{
     if(amount==null) return null;
     if(!currency||currency==='EUR') return amount;
@@ -319,21 +334,19 @@ function App(){
     if(currency==='DKK') return fx['EURDKK=X']?amount/fx['EURDKK=X']:null;
     return amount;
   };
- 
+
   function calcPos(p){
     const mv=Array.isArray(p.mouvements)?p.mouvements:[];
     const px=prices[p.ticker], cours=px?.p??null, cur=px?.c??'';
-    let buyQ=0,buyCost=0,sellQ=0;
+    let buyQ=0,buyEUR=0,sellQ=0,sellEUR=0;
     mv.forEach(x=>{
-      const q=Number(x.qte)||0, pr=Number(x.prix)||0;
-      if(x.type==='vente') sellQ+=q; else {buyQ+=q;buyCost+=q*pr;}
+      const q=num(x.qte), mt=num(x.montant);
+      if(x.type==='vente'){sellQ+=q;sellEUR+=mt;} else {buyQ+=q;buyEUR+=mt;}
     });
     const qte=buyQ-sellQ;
-    const pmp=buyQ>0?buyCost/buyQ:0;
-    const investedNat=qte>0?qte*pmp:0;
-    const investedEUR=toEUR(investedNat,cur);
+    const investedEUR=buyEUR-sellEUR;            // somme investie nette = total achats − total ventes
     const valNat=cours&&qte>0?cours*qte:0;
-    const valEUR=toEUR(valNat,cur);
+    const valEUR=toEUR(valNat,cur);              // valorisation : cours live converti en €
     const buyDates=mv.filter(x=>x.type!=='vente').map(x=>x.date).filter(Boolean).sort();
     const firstBuy=buyDates[0]||null;
     let last=null,lastType=null;
@@ -345,11 +358,11 @@ function App(){
     const mos1=cours&&p.pc1?((p.pc1-cours)/p.pc1)*100:null;
     const mos2=cours&&pc2?((pc2-cours)/pc2)*100:null;
     const mos3=cours&&pc3?((pc3-cours)/pc3)*100:null;
-    return {mv,cours,cur,qte,pmp,investedNat,investedEUR,valNat,valEUR,firstBuy,last,lastType,holdM,sinceM,pc2,pc3,mos1,mos2,mos3};
+    return {mv,cours,cur,qte,investedEUR,valEUR,firstBuy,last,lastType,holdM,sinceM,pc2,pc3,mos1,mos2,mos3};
   }
- 
+
   useEffect(()=>{init();},[]);
- 
+
   async function init(){
     const {data:posData,error:e1}=await db.from('positions').select('*').order('id');
     if(e1){setError('Supabase: '+e1.message);setLoading(false);return;}
@@ -365,7 +378,7 @@ function App(){
     await doFetch(positions,watchlist);
     setLoading(false);
   }
- 
+
   async function doFetch(p,w){
     setFetching(true);setError(null);
     const positions=p||pos, watchlist=w||wl;
@@ -382,7 +395,7 @@ function App(){
     }catch(e){setError('Erreur : '+e.message);}
     setFetching(false);
   }
- 
+
   async function fetchAllPrices(tickers){
     const BATCH=10,px={};
     for(let i=0;i<tickers.length;i+=BATCH){
@@ -395,17 +408,17 @@ function App(){
     }
     return px;
   }
- 
+
   // Positions CRUD
   async function addPos(f){const {data}=await db.from('positions').insert([f]).select();if(data){const u=[...pos,...data];setPos(u);doFetch(u,wl);}setAddNew(false);}
   async function updPos(f){await db.from('positions').update(f).eq('id',f.id);const u=pos.map(x=>x.id===f.id?f:x);setPos(u);setEditId(null);doFetch(u,wl);}
   async function delPos(id){await db.from('positions').delete().eq('id',id);setPos(pos.filter(x=>x.id!==id));setDelId(null);}
- 
+
   // Watchlist CRUD
   async function addWl(f){const {data}=await db.from('watchlist').insert([f]).select();if(data){const u=[...wl,...data];setWl(u);doFetch(pos,u);}setWlAdding(false);}
   async function updWl(f){await db.from('watchlist').update(f).eq('id',f.id);const u=wl.map(x=>x.id===f.id?f:x);setWl(u);setWlEditId(null);doFetch(pos,u);}
   async function delWl(id){await db.from('watchlist').delete().eq('id',id);setWl(wl.filter(x=>x.id!==id));}
- 
+
   // Toggle d'une cible (pc1_on/pc2_on/pc3_on) sur la bonne table
   async function setPcFlag(line,key,val){
     if(line.wlType==='watch'){
@@ -416,9 +429,9 @@ function App(){
       setPos(pos.map(x=>x.id===line.id?{...x,[key]:val}:x));
     }
   }
- 
+
   const toggle=id=>setExpanded(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
- 
+
   const s={
     btn: {padding:'6px 14px',borderRadius:6,border:'none',cursor:'pointer',fontSize:13,fontWeight:600},
     lbl: {fontSize:11,color:'#9CA3AF',marginBottom:4,display:'block'},
@@ -427,18 +440,18 @@ function App(){
     td:  {padding:'10px 12px',borderBottom:'1px solid #F7F6F3',verticalAlign:'middle'},
     card:{background:'#FFFFFF',borderRadius:12,padding:16,border:'1px solid #EEEDE9'},
   };
- 
+
   if(loading) return(
     <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#F7F6F3'}}>
       <div style={{textAlign:'center',color:'#9CA3AF'}}><div style={{fontSize:44,marginBottom:12}}>📊</div><div>Chargement...</div></div>
     </div>
   );
- 
+
   // ── Données dérivées ──
   const calc = {}; pos.forEach(p=>{calc[p.id]=calcPos(p);});
   const held    = pos.filter(p=>calc[p.id].qte>0);                 // en portefeuille
   const exited  = pos.filter(p=>calc[p.id].qte<=0 && calc[p.id].mv.length>0); // sortis
- 
+
   const filtered=held.filter(p=>(fEnv==='ALL'||p.env===fEnv)&&(fCat==='ALL'||p.cat===fCat));
   const grouped =CATS.map(cat=>({cat,items:filtered.filter(p=>p.cat===cat)})).filter(g=>g.items.length>0);
   const totalValEUR =held.reduce((a,p)=>a+(calc[p.id].valEUR||0),0);
@@ -447,7 +460,7 @@ function App(){
     const v=held.filter(p=>p.cat===cat).reduce((a,p)=>a+(calc[p.id].valEUR||0),0);
     return totalValEUR>0?(v/totalValEUR)*100:0;
   };
- 
+
   // Agrégation par ticker (allocation)
   const byTicker={};
   held.forEach(p=>{
@@ -463,7 +476,7 @@ function App(){
   const byTitleInv=posRankedEUR.filter(p=>p.invEUR>0).map(p=>({name:p.ticker,value:Math.round(p.invEUR),cat:p.cat})).sort((a,b)=>b.value-a.value);
   const byTitleVal=posRankedEUR.filter(p=>p.valEUR>0).map(p=>({name:p.ticker,value:Math.round(p.valEUR),cat:p.cat})).sort((a,b)=>b.value-a.value);
   const titleColors={}; [...new Set([...byTitleInv,...byTitleVal].map(x=>x.name))].forEach((t,i)=>{titleColors[t]=sliceColor(i);});
- 
+
   // ── Watchlist fusionnée, avec cible sélectionnable ──
   const targetIdx = l => (l.pc1_on!==false?1:l.pc2_on!==false?2:l.pc3_on!==false?3:1);
   const seenTk=new Set(); const wlMerged=[];
@@ -485,10 +498,10 @@ function App(){
     const vb=[null,mb.mos1,mb.mos2,mb.mos3][targetIdx(b)];
     return (vb==null?-999:vb)-(va==null?-999:va);
   });
- 
+
   return(
     <div style={{background:'#F7F6F3',minHeight:'100vh',color:'#191919',fontFamily:'system-ui,sans-serif',fontSize:14}}>
- 
+
       {/* Header */}
       <div style={{padding:'14px 24px',borderBottom:'1px solid #EEEDE9',display:'flex',alignItems:'center',justifyContent:'space-between',background:'#FFFFFF'}}>
         <div>
@@ -507,7 +520,7 @@ function App(){
           <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280'}} onClick={()=>doFetch()} disabled={fetching}>⟳ Actualiser</button>
         </div>
       </div>
- 
+
       {/* Summary */}
       <div style={{display:'flex',gap:10,padding:'12px 24px',background:'#FFFFFF',borderBottom:'1px solid #EEEDE9',overflowX:'auto'}}>
         {[{l:'Positions',v:held.length},{l:'PEA',v:held.filter(p=>p.env==='PEA').length+' pos.'},{l:'CTO',v:held.filter(p=>p.env==='CTO').length+' pos.'},{l:'PER',v:held.filter(p=>p.env==='PER').length+' pos.'},{l:'Valeur totale (€)',v:totalValEUR>0?m(fmtEUR(totalValEUR)):'—'}]
@@ -518,7 +531,7 @@ function App(){
           </div>
         ))}
       </div>
- 
+
       {/* Tabs */}
       <div style={{display:'flex',gap:2,padding:'10px 24px',background:'#FFFFFF',borderBottom:'1px solid #EEEDE9',flexWrap:'wrap'}}>
         {[{id:'portfolio',l:'📋 Portefeuille'},{id:'watchlist',l:'👁 Watchlist'},{id:'allocation',l:'🥧 Allocation'},{id:'sortis',l:'📤 Sortis'},{id:'editeur',l:'✏️ Éditeur'}].map(({id,l})=>(
@@ -528,9 +541,9 @@ function App(){
           </button>
         ))}
       </div>
- 
+
       <div style={{padding:24}}>
- 
+
         {/* ── PORTEFEUILLE ── */}
         {tab==='portfolio'&&(
           <div>
@@ -608,16 +621,16 @@ function App(){
                                 {c.mv.length===0?<div style={{fontSize:12,color:'#D1D5DB'}}>Aucun mouvement enregistré</div>:(
                                   <table style={{borderCollapse:'collapse',fontSize:12,minWidth:340}}>
                                     <thead><tr>
-                                      <th style={{...s.th,padding:'5px 12px'}}>Date</th><th style={{...s.th,padding:'5px 12px'}}>Type</th>
-                                      <th style={{...s.th,padding:'5px 12px'}}>Qté</th><th style={{...s.th,padding:'5px 12px'}}>Prix</th>
+                                      <th style={{...s.th,padding:'5px 12px'}}>Date</th><th style={{...s.th,padding:'5px 12px'}}>Sens</th>
+                                      <th style={{...s.th,padding:'5px 12px'}}>Nb actions</th><th style={{...s.th,padding:'5px 12px'}}>Montant €</th>
                                     </tr></thead>
                                     <tbody>
                                       {[...c.mv].sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map((mvt,i)=>(
                                         <tr key={i}>
                                           <td style={{...s.td,padding:'5px 12px'}}>{fmtDate(mvt.date)}</td>
                                           <td style={{...s.td,padding:'5px 12px',color:mvt.type==='vente'?'#DC2626':'#16A34A',fontWeight:600}}>{mvt.type==='vente'?'Vente':'Achat'}</td>
-                                          <td style={{...s.td,padding:'5px 12px'}}>{m(mvt.qte)}</td>
-                                          <td style={{...s.td,padding:'5px 12px'}}>{m(fmt(mvt.prix))} {c.cur}</td>
+                                          <td style={{...s.td,padding:'5px 12px'}}>{m(fmtQte(num(mvt.qte)))}</td>
+                                          <td style={{...s.td,padding:'5px 12px'}}>{m(fmtEUR(num(mvt.montant)))}</td>
                                         </tr>
                                       ))}
                                     </tbody>
@@ -637,7 +650,7 @@ function App(){
             <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>▸ Cliquez sur une ligne pour les prix cibles et l'historique des mouvements — 🔴 dernier mouvement = vente</div>
           </div>
         )}
- 
+
         {/* ── WATCHLIST ── */}
         {tab==='watchlist'&&(
           <div>
@@ -650,7 +663,7 @@ function App(){
                 {wlAdding?'✕ Annuler':'+ Ajouter'}
               </button>
             </div>
- 
+
             {wlAdding&&(
               <div style={{...s.card,marginBottom:16}}>
                 <div style={{fontWeight:600,marginBottom:12,color:'#6B7280',fontSize:13}}>Nouveau titre</div>
@@ -663,7 +676,7 @@ function App(){
                 <WlForm init={wl.find(x=>x.id===wlEditId)||{}} onSave={updWl} onCancel={()=>setWlEditId(null)} s={s}/>
               </div>
             )}
- 
+
             <div style={{overflowX:'auto',borderRadius:12,border:'1px solid #EEEDE9',background:'#FFFFFF'}}>
               <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
                 <thead>
@@ -733,7 +746,7 @@ function App(){
             <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>☑ Cible active · <span style={{color:'#CF6D56'}}>cible retenue pour le tri en orange</span> — 🟢 marge &gt; 15% · 🟡 0-15% · 🔴 au-dessus de la cible</div>
           </div>
         )}
- 
+
         {/* ── ALLOCATION ── */}
         {tab==='allocation'&&(
           <div>
@@ -818,7 +831,7 @@ function App(){
             </div>
           </div>
         )}
- 
+
         {/* ── SORTIS ── */}
         {tab==='sortis'&&(
           <div>
@@ -854,16 +867,16 @@ function App(){
                           <tr><td colSpan={8} style={{padding:'12px 24px',background:'#FAFAF8',borderBottom:'1px solid #EEEDE9'}}>
                             <table style={{borderCollapse:'collapse',fontSize:12,minWidth:340}}>
                               <thead><tr>
-                                <th style={{...s.th,padding:'5px 12px'}}>Date</th><th style={{...s.th,padding:'5px 12px'}}>Type</th>
-                                <th style={{...s.th,padding:'5px 12px'}}>Qté</th><th style={{...s.th,padding:'5px 12px'}}>Prix</th>
+                                <th style={{...s.th,padding:'5px 12px'}}>Date</th><th style={{...s.th,padding:'5px 12px'}}>Sens</th>
+                                <th style={{...s.th,padding:'5px 12px'}}>Nb actions</th><th style={{...s.th,padding:'5px 12px'}}>Montant €</th>
                               </tr></thead>
                               <tbody>
                                 {[...c.mv].sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map((mvt,i)=>(
                                   <tr key={i}>
                                     <td style={{...s.td,padding:'5px 12px'}}>{fmtDate(mvt.date)}</td>
                                     <td style={{...s.td,padding:'5px 12px',color:mvt.type==='vente'?'#DC2626':'#16A34A',fontWeight:600}}>{mvt.type==='vente'?'Vente':'Achat'}</td>
-                                    <td style={{...s.td,padding:'5px 12px'}}>{m(mvt.qte)}</td>
-                                    <td style={{...s.td,padding:'5px 12px'}}>{m(fmt(mvt.prix))} {c.cur}</td>
+                                    <td style={{...s.td,padding:'5px 12px'}}>{m(fmtQte(num(mvt.qte)))}</td>
+                                    <td style={{...s.td,padding:'5px 12px'}}>{m(fmtEUR(num(mvt.montant)))}</td>
                                   </tr>
                                 ))}
                               </tbody>
@@ -880,7 +893,7 @@ function App(){
             </div>
           </div>
         )}
- 
+
         {/* ── ÉDITEUR ── */}
         {tab==='editeur'&&(
           <div>
@@ -950,7 +963,7 @@ function App(){
     </div>
   );
 }
- 
+
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
 </body>
