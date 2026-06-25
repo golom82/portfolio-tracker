@@ -462,21 +462,38 @@ function App(){
     return px;
   }
 
+  // Retire les colonnes non modifiables (PK identité + timestamp auto) avant tout UPDATE
+  const stripMeta = ({id, created_at, ...rest}) => rest;
+
   // Positions CRUD
   async function addPos(f){const {data}=await db.from('positions').insert([f]).select();if(data){const u=[...pos,...data];setPos(u);doFetch(u,wl);}setAddNew(false);}
-  async function updPos(f){await db.from('positions').update(f).eq('id',f.id);const u=pos.map(x=>x.id===f.id?f:x);setPos(u);setEditId(null);doFetch(u,wl);}
+  async function updPos(f){
+    const patch=stripMeta(f);
+    const {error}=await db.from('positions').update(patch).eq('id',f.id);
+    if(error){setError('MAJ position : '+error.message);return;}
+    const u=pos.map(x=>x.id===f.id?{...x,...patch}:x);setPos(u);setEditId(null);doFetch(u,wl);
+  }
   async function delPos(id){await db.from('positions').delete().eq('id',id);setPos(pos.filter(x=>x.id!==id));setDelId(null);}
 
   // Watchlist CRUD
   async function addWl(f){const {data}=await db.from('watchlist').insert([f]).select();if(data){const u=[...wl,...data];setWl(u);doFetch(pos,u);}setWlAdding(false);}
-  async function updWl(f){await db.from('watchlist').update(f).eq('id',f.id);const u=wl.map(x=>x.id===f.id?f:x);setWl(u);setWlEditId(null);doFetch(pos,u);}
+  async function updWl(f){
+    const patch=stripMeta(f);
+    const {error}=await db.from('watchlist').update(patch).eq('id',f.id);
+    if(error){setError('MAJ watchlist : '+error.message);return;}
+    setWl(wl.map(x=>x.id===f.id?{...x,...patch}:x));setWlEditId(null);
+  }
   async function delWl(id){await db.from('watchlist').delete().eq('id',id);setWl(wl.filter(x=>x.id!==id));}
 
   // Cash CRUD
   async function addCash(f){const {data}=await db.from('cash_flows').insert([f]).select();if(data)setCashFlows([...cashFlows,...data]);setCashAdding(false);}
-  async function updCash(f){await db.from('cash_flows').update(f).eq('id',f.id);setCashFlows(cashFlows.map(x=>x.id===f.id?f:x));setCashEditId(null);}
+  async function updCash(f){
+    const patch=stripMeta(f);
+    const {error}=await db.from('cash_flows').update(patch).eq('id',f.id);
+    if(error){setError('MAJ liquidités : '+error.message);return;}
+    setCashFlows(cashFlows.map(x=>x.id===f.id?{...x,...patch}:x));setCashEditId(null);
+  }
   async function delCash(id){await db.from('cash_flows').delete().eq('id',id);setCashFlows(cashFlows.filter(x=>x.id!==id));setCashDelId(null);}
-
   // Toggle d'une cible (pc1_on/pc2_on/pc3_on) sur la bonne table
   async function setPcFlag(line,key,val){
     if(line.wlType==='watch'){
