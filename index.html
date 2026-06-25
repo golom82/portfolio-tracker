@@ -316,7 +316,7 @@ function CashForm({init,onSave,onCancel,isNew=false,s,tickers=[]}){
   );
 }
 
-function TitleStats({c,mask}){
+ffunction TitleStats({c,mask}){
   const M=mask||(v=>v);
   const sign=n=>n==null?'#9CA3AF':n>=0?'#16A34A':'#DC2626';
   const sv=n=>n==null?'—':M((n>=0?'+':'−')+fmtEUR(Math.abs(n)));
@@ -325,23 +325,22 @@ function TitleStats({c,mask}){
     {l:'Ventes',v:c.sellEUR?M(fmtEUR(c.sellEUR)):'—'},
     {l:'Investi net',v:c.investedEUR?M(fmtEUR(c.investedEUR)):'—'},
     {l:'Valorisation',v:c.valEUR?M(fmtEUR(c.valEUR)):'—'},
-    {l:'Dividendes',v:c.divEUR?M(fmtEUR(c.divEUR)):'—'},
-    {l:'Réalisé',v:sv(c.realized),clr:sign(c.realized)},
+    {l:'Réalisé',v:sv(c.realized),clr:sign(c.realized),sub:c.divEUR?('dont dividendes : '+M((c.divEUR>=0?'+':'−')+fmtEUR(Math.abs(c.divEUR)))):null},
     {l:'Latent',v:sv(c.latent),clr:sign(c.latent)},
     {l:'Résultat total',v:sv(c.result),clr:sign(c.result)},
   ];
   return(
     <div style={{display:'flex',gap:20,flexWrap:'wrap',padding:'10px 14px',background:'#FFFFFF',border:'1px solid #EEEDE9',borderRadius:8,marginBottom:14}}>
-      {cells.map(({l,v,clr})=>(
+      {cells.map(({l,v,clr,sub})=>(
         <div key={l}>
           <div style={{fontSize:10,color:'#9CA3AF',textTransform:'uppercase',letterSpacing:'0.05em'}}>{l}</div>
           <div style={{fontWeight:700,fontSize:16,marginTop:2,color:clr||'#191919'}}>{v}</div>
+          {sub&&<div style={{fontSize:10,color:'#9CA3AF',marginTop:2}}>{sub}</div>}
         </div>
       ))}
     </div>
   );
 }
-
 function App(){
   const [pos,       setPos]       = useState([]);
   const [wl,        setWl]        = useState([]);
@@ -383,24 +382,35 @@ function App(){
   function calcPos(p){
     const mv=Array.isArray(p.mouvements)?p.mouvements:[];
     const px=prices[p.ticker], cours=px?.p??null, cur=px?.c??'';
-    let buyQ=0,buyEUR=0,sellQ=0,sellEUR=0;
-    mv.forEach(x=>{
+    // Parcours chronologique : PRU roulant + plus-value réalisée figée à chaque vente
+    const ordered=[...mv].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+    let buyQ=0,buyEUR=0,sellQ=0,sellEUR=0;          // cumuls bruts (affichage)
+    let runQ=0,runCost=0,realizedGain=0;            // qté détenue, coût de revient € détenu, PV réalisée €
+    ordered.forEach(x=>{
       const q=num(x.qte), mt=num(x.montant);
-      if(x.type==='vente'){sellQ+=q;sellEUR+=mt;} else {buyQ+=q;buyEUR+=mt;}
+      if(x.type==='vente'){
+        sellQ+=q; sellEUR+=mt;
+        const pru=runQ>0?runCost/runQ:0;
+        const coutVendu=Math.min(pru*q, runCost);   // coût de revient des titres sortis (PRU du moment)
+        realizedGain += mt - coutVendu;             // produit − coût = plus-value réalisée
+        runQ=Math.max(runQ-q,0); runCost=Math.max(runCost-coutVendu,0);
+      }else{
+        buyQ+=q; buyEUR+=mt;
+        runQ+=q; runCost+=mt;                        // renforcement : le PRU se recalcule de fait
+      }
     });
-    const qte=buyQ-sellQ;
-    const investedEUR=buyEUR-sellEUR;            // somme investie nette = total achats − total ventes
+    const qte=runQ;
+    const investedEUR=buyEUR-sellEUR;                // somme investie nette
     const valNat=cours&&qte>0?cours*qte:0;
-    const valEUR=toEUR(valNat,cur);              // valorisation : cours live converti en €
+    const valEUR=toEUR(valNat,cur);                  // valorisation : cours live converti en €
     const divEUR=cashFlows.filter(x=>x.type==='dividende'&&x.ticker===p.ticker&&x.env===p.env).reduce((a,x)=>a+num(x.montant),0);
-    const pmpEUR=buyQ>0?buyEUR/buyQ:0;           // coût moyen € par action (interne, pour réalisé/latent)
-    const realized=sellEUR-sellQ*pmpEUR+divEUR;  // réalisé = ventes − coût des titres vendus + dividendes
-    const latent=valEUR!=null?(valEUR-qte*pmpEUR):null; // latent = valo − coût des titres détenus
-    const result=latent!=null?(realized+latent):null;   // total = réalisé + latent (= valo+div−investi)
+    const realized=realizedGain+divEUR;              // réalisé = PV réalisée + dividendes
+    const latent=valEUR!=null?(valEUR-runCost):null; // latent = valo − coût de revient des titres détenus
+    const result=latent!=null?(realized+latent):null;// total = réalisé + latent (= valo + div − investi net)
     const buyDates=mv.filter(x=>x.type!=='vente').map(x=>x.date).filter(Boolean).sort();
     const firstBuy=buyDates[0]||null;
     let last=null,lastType=null;
-    mv.forEach(x=>{ if(num(x.montant)===0) return;   // mouvement à 0 € (frais/ajustement) : ignoré pour le « dernier mouvement »
+    mv.forEach(x=>{ if(num(x.montant)===0) return;
       if(x.date&&(last==null||x.date>=last)){last=x.date;lastType=x.type;} });
     const holdM=monthsElapsed(firstBuy);
     const sinceM=monthsElapsed(last);
@@ -409,7 +419,7 @@ function App(){
     const mos1=cours&&p.pc1?((p.pc1-cours)/p.pc1)*100:null;
     const mos2=cours&&pc2?((pc2-cours)/pc2)*100:null;
     const mos3=cours&&pc3?((pc3-cours)/pc3)*100:null;
-    return {mv,cours,cur,qte,buyEUR,sellEUR,investedEUR,valEUR,divEUR,realized,latent,result,firstBuy,last,lastType,holdM,sinceM,pc2,pc3,mos1,mos2,mos3};
+    return {mv,cours,cur,qte,buyEUR,sellEUR,investedEUR,valEUR,divEUR,realizedGain,realized,latent,result,firstBuy,last,lastType,holdM,sinceM,pc2,pc3,mos1,mos2,mos3};
   }
 
   useEffect(()=>{init();},[]);
