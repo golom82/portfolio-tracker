@@ -38,7 +38,7 @@ const ENVS    = ['PEA','CTO','PER'];
 const CAT_CLR = {'Défensif':'#0D9488','Quality Core':'#2563EB','Quality Satellite':'#7C3AED','Outsider':'#D97706','Liquidités':'#64748B'};
 const ENV_CLR = {PEA:'#059669',CTO:'#2563EB',PER:'#EA580C'};
 const CASH_CLR = '#64748B';
-const CASH_TYPES = ['apport','retrait'];      // apport = +cash, retrait = −cash (dividende/frais à venir si besoin)
+const CASH_TYPES = ['apport','retrait','dividende']; // apport/dividende = +cash, retrait = −cash
 const FX_TICKERS = ['EURUSD=X','EURCAD=X','EURDKK=X'];
 
 // Seed — catégories migrées vers le nouveau schéma. Mouvements vides : à renseigner via l'éditeur.
@@ -306,9 +306,10 @@ function WlForm({init,onSave,onCancel,s}){
   );
 }
 
-function CashForm({init,onSave,onCancel,isNew=false,s}){
-  const [f,setF]=useState({env:'CTO',date:new Date().toISOString().slice(0,10),type:'apport',montant:'',...init});
+function CashForm({init,onSave,onCancel,isNew=false,s,tickers=[]}){
+  const [f,setF]=useState({env:'CTO',date:new Date().toISOString().slice(0,10),type:'apport',montant:'',ticker:'',...init});
   const upd=(k,v)=>setF(p=>({...p,[k]:v}));
+  const isDiv=f.type==='dividende';
   return(
     <div>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(140px,1fr))',gap:12}}>
@@ -322,14 +323,23 @@ function CashForm({init,onSave,onCancel,isNew=false,s}){
           <select style={{...s.inp,color:f.type==='retrait'?'#DC2626':'#16A34A',fontWeight:600}} value={f.type} onChange={e=>upd('type',e.target.value)}>
             <option value="apport">Apport (+)</option>
             <option value="retrait">Retrait (−)</option>
+            <option value="dividende">Dividende (+)</option>
           </select>
         </div>
+        {isDiv&&(
+          <div><label style={s.lbl}>Titre</label>
+            <select style={s.inp} value={f.ticker||''} onChange={e=>upd('ticker',e.target.value)}>
+              <option value="">— choisir —</option>
+              {tickers.map(t=><option key={t.ticker} value={t.ticker}>{t.ticker}{t.name?' · '+t.name:''}</option>)}
+            </select>
+          </div>
+        )}
         <div><label style={s.lbl}>Montant (€)</label>
           <input style={s.inp} type="text" inputMode="decimal" placeholder="ex. 5 000,00" value={f.montant??''} onChange={e=>upd('montant',e.target.value)}/>
         </div>
       </div>
       <div style={{display:'flex',gap:8,marginTop:14}}>
-        <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>onSave({...f,montant:num(f.montant)})}>{isNew?'+ Ajouter':'✓ Sauvegarder'}</button>
+        <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>onSave({...f,montant:num(f.montant),ticker:isDiv?(f.ticker||null):null})}>{isNew?'+ Ajouter':'✓ Sauvegarder'}</button>
         <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280'}} onClick={onCancel}>Annuler</button>
       </div>
     </div>
@@ -384,10 +394,13 @@ function App(){
     const investedEUR=buyEUR-sellEUR;            // somme investie nette = total achats − total ventes
     const valNat=cours&&qte>0?cours*qte:0;
     const valEUR=toEUR(valNat,cur);              // valorisation : cours live converti en €
+    const divEUR=cashFlows.filter(x=>x.type==='dividende'&&x.ticker===p.ticker&&x.env===p.env).reduce((a,x)=>a+num(x.montant),0);
+    const result=valEUR!=null?(valEUR+divEUR-investedEUR):null; // val + dividendes − investi
     const buyDates=mv.filter(x=>x.type!=='vente').map(x=>x.date).filter(Boolean).sort();
     const firstBuy=buyDates[0]||null;
     let last=null,lastType=null;
-    mv.forEach(x=>{ if(x.date&&(last==null||x.date>=last)){last=x.date;lastType=x.type;} });
+    mv.forEach(x=>{ if(num(x.montant)===0) return;   // mouvement à 0 € (frais/ajustement) : ignoré pour le « dernier mouvement »
+      if(x.date&&(last==null||x.date>=last)){last=x.date;lastType=x.type;} });
     const holdM=monthsElapsed(firstBuy);
     const sinceM=monthsElapsed(last);
     const pc2=p.pc1>0?p.pc1*(1-p.mos/200):0;
@@ -395,7 +408,7 @@ function App(){
     const mos1=cours&&p.pc1?((p.pc1-cours)/p.pc1)*100:null;
     const mos2=cours&&pc2?((pc2-cours)/pc2)*100:null;
     const mos3=cours&&pc3?((pc3-cours)/pc3)*100:null;
-    return {mv,cours,cur,qte,investedEUR,valEUR,firstBuy,last,lastType,holdM,sinceM,pc2,pc3,mos1,mos2,mos3};
+    return {mv,cours,cur,qte,investedEUR,valEUR,divEUR,result,firstBuy,last,lastType,holdM,sinceM,pc2,pc3,mos1,mos2,mos3};
   }
 
   useEffect(()=>{init();},[]);
@@ -513,6 +526,7 @@ function App(){
   });
   const totalCash = ENVS.reduce((a,e)=>a+cashByEnv[e],0);
   const grandTotal = totalValEUR + totalCash;          // titres + cash
+  const cashTickers = [...new Map(pos.map(p=>[p.ticker,{ticker:p.ticker,name:p.name}])).values()];
 
   const catWeight = cat => {
     const v=held.filter(p=>p.cat===cat).reduce((a,p)=>a+(calc[p.id].valEUR||0),0);
@@ -681,6 +695,20 @@ function App(){
                                       onClick={e=>{e.stopPropagation();setEditId(p.id);setTab('editeur');}}>✏️ Modifier</button>
                                   </div>
                                 </div>
+                                {/* Synthèse chiffrée du titre */}
+                                <div style={{display:'flex',gap:20,flexWrap:'wrap',padding:'10px 14px',background:'#FFFFFF',border:'1px solid #EEEDE9',borderRadius:8,marginBottom:14}}>
+                                  {[
+                                    {l:'Investi',v:c.investedEUR?m(fmtEUR(c.investedEUR)):'—'},
+                                    {l:'Valorisation',v:c.valEUR?m(fmtEUR(c.valEUR)):'—'},
+                                    {l:'Dividendes versés',v:c.divEUR?m(fmtEUR(c.divEUR)):'—'},
+                                    {l:'Résultat (val.+div.−investi)',v:c.result==null?'—':m((c.result>=0?'+':'')+fmtEUR(c.result)),clr:c.result==null?'#9CA3AF':c.result>=0?'#16A34A':'#DC2626'},
+                                  ].map(({l,v,clr})=>(
+                                    <div key={l}>
+                                      <div style={{fontSize:10,color:'#9CA3AF',textTransform:'uppercase',letterSpacing:'0.05em'}}>{l}</div>
+                                      <div style={{fontWeight:700,fontSize:16,marginTop:2,color:clr||'#191919'}}>{v}</div>
+                                    </div>
+                                  ))}
+                                </div>
                                 {/* Détail des mouvements */}
                                 <div style={{fontSize:11,color:'#9CA3AF',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>Historique des mouvements</div>
                                 {c.mv.length===0?<div style={{fontSize:12,color:'#D1D5DB'}}>Aucun mouvement enregistré</div>:(
@@ -712,7 +740,7 @@ function App(){
                 </tbody>
               </table>
             </div>
-            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>▸ Cliquez sur une ligne pour les prix cibles et l'historique des mouvements — 🔴 dernier mouvement = vente</div>
+            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>▸ Cliquez sur une ligne pour les prix cibles et l'historique des mouvements — 🔴 dernier mouvement = vente · les mouvements à 0 € (frais/ajustements) réduisent la quantité mais ne comptent ni comme dernier mouvement ni sur le cash</div>
           </div>
         )}
 
@@ -775,13 +803,13 @@ function App(){
                         <td style={s.td}>{isPortfolio?<Badge text={l.env||'Portfolio'} color={ENV_CLR[l.env]||'#6B7280'}/>:<Badge text="Watch" color="#9CA3AF"/>}</td>
                         <td style={s.td}><span style={{fontWeight:600}}>{mg.cours?fmt(mg.cours):'—'}</span>{mg.cur&&<span style={{fontSize:10,color:'#9CA3AF',marginLeft:3}}>{mg.cur}</span>}</td>
                         {cells.map(([pc,mos,key,n])=>{
-                          const on=l[key]!==false; const isTgt=tgt===n;
+                          const on=l[key]!==false;
                           return(
                             <Fragment key={n}>
                               <td style={{...s.td,opacity:on?1:0.4}}>
                                 <label style={{display:'flex',alignItems:'center',gap:5,cursor:'pointer'}}>
                                   <input type="checkbox" checked={on} onChange={e=>setPcFlag(l,key,e.target.checked)}/>
-                                  <span style={{fontWeight:600,color:pc>0?(isTgt?'#CF6D56':'#191919'):'#D1D5DB'}}>{pc>0?fmt(pc):'—'}</span>
+                                  <span style={{fontWeight:600,color:pc>0?'#191919':'#D1D5DB'}}>{pc>0?fmt(pc):'—'}</span>
                                 </label>
                               </td>
                               <td style={{...s.td,opacity:on?1:0.35}}>
@@ -808,7 +836,7 @@ function App(){
                 </tbody>
               </table>
             </div>
-            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>☑ Cible active · <span style={{color:'#CF6D56'}}>cible retenue pour le tri en orange</span> — 🟢 marge &gt; 15% · 🟡 0-15% · 🔴 au-dessus de la cible</div>
+            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>☑ Cible active (les colonnes décochées sont grisées) — le tri utilise la cible active la plus haute · 🟢 marge &gt; 15% · 🟡 0-15% · 🔴 au-dessus de la cible</div>
           </div>
         )}
 
@@ -944,7 +972,7 @@ function App(){
             {cashAdding&&(
               <div style={{...s.card,marginBottom:16}}>
                 <div style={{fontWeight:600,marginBottom:12,color:'#6B7280',fontSize:13}}>Nouveau flux</div>
-                <CashForm isNew init={{}} onSave={addCash} onCancel={()=>setCashAdding(false)} s={s}/>
+                <CashForm isNew init={{}} onSave={addCash} onCancel={()=>setCashAdding(false)} s={s} tickers={cashTickers}/>
               </div>
             )}
 
@@ -960,7 +988,7 @@ function App(){
                       <Fragment key={cf.id}>
                         {cashEditId===cf.id?(
                           <tr><td colSpan={5} style={{padding:16,background:'#FAFAF8'}}>
-                            <CashForm init={cf} onSave={updCash} onCancel={()=>setCashEditId(null)} s={s}/>
+                            <CashForm init={cf} onSave={updCash} onCancel={()=>setCashEditId(null)} s={s} tickers={cashTickers}/>
                           </td></tr>
                         ):cashDelId===cf.id?(
                           <tr style={{background:'#FEF2F2'}}>
@@ -974,7 +1002,10 @@ function App(){
                           <tr onMouseEnter={e=>e.currentTarget.style.background='#FAFAF8'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                             <td style={{...s.td,color:'#6B7280'}}>{fmtDate(cf.date)}</td>
                             <td style={s.td}><Badge text={cf.env} color={ENV_CLR[cf.env]}/></td>
-                            <td style={{...s.td,color:cf.type==='retrait'?'#DC2626':'#16A34A',fontWeight:600}}>{cf.type==='retrait'?'Retrait':'Apport'}</td>
+                            <td style={{...s.td,color:cf.type==='retrait'?'#DC2626':'#16A34A',fontWeight:600}}>
+                              {cf.type==='retrait'?'Retrait':cf.type==='dividende'?'Dividende':'Apport'}
+                              {cf.type==='dividende'&&cf.ticker&&<span style={{color:'#6B7280',fontWeight:400}}> · {cf.ticker}</span>}
+                            </td>
                             <td style={s.td}>{m((cf.type==='retrait'?'−':'+')+fmtEUR(num(cf.montant)))}</td>
                             <td style={s.td}>
                               <div style={{display:'flex',gap:4}}>
