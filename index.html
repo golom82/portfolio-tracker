@@ -29,6 +29,32 @@ const SUPABASE_URL      = 'https://mtrvcgicwcraqjxknoid.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im10cnZjZ2ljd2NyYXFqeGtub2lkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzk4NDksImV4cCI6MjA5MTkxNTg0OX0.F78OxlzPOIxpMhXkCFSA9Y96cJUUVpe6mw3S3aM6XJA';
 // ═══════════════════════════════════════════════════════
 
+// ───────────────────────────────────────────────────────
+// MÉMO — OPÉRATIONS SUR TITRES (splits, spin-offs, AG)
+// Aucun type de mouvement dédié : on s'appuie sur l'achat/vente à 0 €
+// (la « règle du montant nul » : 0 € n'impacte ni le cash ni le « dernier mvt »).
+//
+//  • SPLIT à la hausse (ex. 10:1) ou ACTIONS GRATUITES / DIVIDENDE EN ACTIONS :
+//      → saisir un ACHAT à 0 € du nombre d'actions CRÉÉES
+//        (= détention actuelle × (ratio − 1) ; pour 10:1 sur 25 titres → +225).
+//      Effet : coût de revient inchangé, quantité corrigée, PRU divisé tout seul,
+//      valorisation réalignée sur le cours Yahoo (déjà ajusté post-split). Cash intact.
+//
+//  • REGROUPEMENT / REVERSE SPLIT (ex. 1:10) :
+//      → saisir une VENTE à 0 € du nombre d'actions SUPPRIMÉES.
+//      Attention : cette vente à 0 € inscrit une micro PERTE réalisée égale au
+//      coût de revient des titres retirés (effet du PRU roulant). Acceptable et rare.
+//
+//  • SPIN-OFF (réception d'une nouvelle ligne sans débourser de cash) :
+//      → créer la nouvelle position et y saisir un ACHAT à 0 € de la quantité reçue.
+//      Cash et total du portefeuille restent EXACTS. Seule l'attribution par ligne
+//      est approchée : l'enfant démarre à coût 0 (100 % latent), le parent garde tout
+//      son coût. À la revente, les réalisés parent/enfant se compensent → juste en agrégé.
+//
+//  Repère : un cours Yahoo qui s'effondre brutalement d'un facteur rond (×10, ÷10)
+//  = split non encore saisi. Ce n'est pas un bug de cotation.
+// ───────────────────────────────────────────────────────
+
 const { createClient } = supabase;
 const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const { useState, useEffect, Fragment } = React;
@@ -316,7 +342,7 @@ function CashForm({init,onSave,onCancel,isNew=false,s,tickers=[]}){
   );
 }
 
-ffunction TitleStats({c,mask}){
+function TitleStats({c,mask}){
   const M=mask||(v=>v);
   const sign=n=>n==null?'#9CA3AF':n>=0?'#16A34A':'#DC2626';
   const sv=n=>n==null?'—':M((n>=0?'+':'−')+fmtEUR(Math.abs(n)));
@@ -341,6 +367,7 @@ ffunction TitleStats({c,mask}){
     </div>
   );
 }
+
 function App(){
   const [pos,       setPos]       = useState([]);
   const [wl,        setWl]        = useState([]);
@@ -400,17 +427,17 @@ function App(){
       }
     });
     const qte=runQ;
-    const investedEUR=buyEUR-sellEUR;                // somme investie nette
+    const investedEUR=buyEUR-sellEUR;            // somme investie nette = total achats − total ventes
     const valNat=cours&&qte>0?cours*qte:0;
-    const valEUR=toEUR(valNat,cur);                  // valorisation : cours live converti en €
+    const valEUR=toEUR(valNat,cur);              // valorisation : cours live converti en €
     const divEUR=cashFlows.filter(x=>x.type==='dividende'&&x.ticker===p.ticker&&x.env===p.env).reduce((a,x)=>a+num(x.montant),0);
-    const realized=realizedGain+divEUR;              // réalisé = PV réalisée + dividendes
+    const realized=realizedGain+divEUR;          // réalisé = PV réalisée + dividendes
     const latent=valEUR!=null?(valEUR-runCost):null; // latent = valo − coût de revient des titres détenus
-    const result=latent!=null?(realized+latent):null;// total = réalisé + latent (= valo + div − investi net)
+    const result=latent!=null?(realized+latent):null;   // total = réalisé + latent (= valo+div−investi)
     const buyDates=mv.filter(x=>x.type!=='vente').map(x=>x.date).filter(Boolean).sort();
     const firstBuy=buyDates[0]||null;
     let last=null,lastType=null;
-    mv.forEach(x=>{ if(num(x.montant)===0) return;
+    mv.forEach(x=>{ if(num(x.montant)===0) return;   // mouvement à 0 € (frais/ajustement) : ignoré pour le « dernier mouvement »
       if(x.date&&(last==null||x.date>=last)){last=x.date;lastType=x.type;} });
     const holdM=monthsElapsed(firstBuy);
     const sinceM=monthsElapsed(last);
@@ -504,6 +531,7 @@ function App(){
     setCashFlows(cashFlows.map(x=>x.id===f.id?{...x,...patch}:x));setCashEditId(null);
   }
   async function delCash(id){await db.from('cash_flows').delete().eq('id',id);setCashFlows(cashFlows.filter(x=>x.id!==id));setCashDelId(null);}
+
   // Toggle d'une cible (pc1_on/pc2_on/pc3_on) sur la bonne table
   async function setPcFlag(line,key,val){
     if(line.wlType==='watch'){
