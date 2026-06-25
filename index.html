@@ -370,6 +370,7 @@ function App(){
   const [cashAdding,setCashAdding]= useState(false);
   const [cashEditId,setCashEditId]= useState(null);
   const [cashDelId, setCashDelId] = useState(null);
+  const [cashEnvFilter,setCashEnvFilter]=useState('ALL');
 
   const m = v => hideAmt ? '•••' : v;                    // helper de masquage
 
@@ -527,6 +528,25 @@ function App(){
   const totalCash = ENVS.reduce((a,e)=>a+cashByEnv[e],0);
   const grandTotal = totalValEUR + totalCash;          // titres + cash
   const cashTickers = [...new Map(pos.map(p=>[p.ticker,{ticker:p.ticker,name:p.name}])).values()];
+  // Registre cash fusionné (flux + trades) pour l'enveloppe filtrée, trié chrono + solde cumulé
+  const cashLedger=(()=>{
+    const evs=[];
+    cashFlows.forEach(cf=>{
+      if(cashEnvFilter!=='ALL'&&cf.env!==cashEnvFilter) return;
+      evs.push({source:'cash',id:cf.id,raw:cf,date:cf.date,env:cf.env,kind:cf.type,label:cf.type==='dividende'?(cf.ticker||''):'',amount:(cf.type==='retrait'?-1:1)*num(cf.montant)});
+    });
+    pos.forEach(p=>{
+      if(cashEnvFilter!=='ALL'&&p.env!==cashEnvFilter) return;
+      (Array.isArray(p.mouvements)?p.mouvements:[]).forEach(mvt=>{
+        const mt=num(mvt.montant); if(mt===0) return;       // 0 € = pas d'impact cash
+        evs.push({source:'trade',posId:p.id,date:mvt.date,env:p.env,kind:mvt.type,label:p.ticker,amount:(mvt.type==='vente'?1:-1)*mt});
+      });
+    });
+    evs.sort((a,b)=>(a.date||'').localeCompare(b.date||'')||(a.source>b.source?1:-1));
+    let run=0; evs.forEach(e=>{run+=e.amount;e.solde=run;});
+    return evs;
+  })();
+  const KIND_LBL={apport:'Apport',retrait:'Retrait',dividende:'Dividende',achat:'Achat',vente:'Vente'};
 
   const catWeight = cat => {
     const v=held.filter(p=>p.cat===cat).reduce((a,p)=>a+(calc[p.id].valEUR||0),0);
@@ -961,18 +981,28 @@ function App(){
               </div>
             </div>
 
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12,flexWrap:'wrap',gap:8}}>
               <div>
-                <div style={{fontWeight:700,fontSize:16}}>Apports & retraits</div>
-                <div style={{fontSize:12,color:'#9CA3AF',marginTop:2}}>Argent versé ou retiré d'une enveloppe. Les achats/ventes ajustent le cash automatiquement, ne les saisissez pas ici.</div>
+                <div style={{fontWeight:700,fontSize:16}}>Registre de liquidités</div>
+                <div style={{fontSize:12,color:'#9CA3AF',marginTop:2}}>Tous les flux qui font bouger le cash : apports, retraits, dividendes et trades. Saisissez ici les apports/retraits/dividendes ; les trades viennent de l'Éditeur.</div>
               </div>
               {!cashAdding&&<button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>{setCashAdding(true);setCashEditId(null);}}>+ Ajouter</button>}
+            </div>
+
+            {/* Filtre par enveloppe */}
+            <div style={{display:'flex',gap:3,marginBottom:12}}>
+              {['ALL',...ENVS].map(e=>(
+                <button key={e} onClick={()=>setCashEnvFilter(e)}
+                  style={{...s.btn,background:cashEnvFilter===e?(e==='ALL'?'#191919':ENV_CLR[e]):'#F0EFE9',color:cashEnvFilter===e?'#fff':'#6B7280',padding:'4px 14px',fontSize:12}}>
+                  {e==='ALL'?'Toutes':e}{e!=='ALL'?'  '+m(fmtEUR(cashByEnv[e])):''}
+                </button>
+              ))}
             </div>
 
             {cashAdding&&(
               <div style={{...s.card,marginBottom:16}}>
                 <div style={{fontWeight:600,marginBottom:12,color:'#6B7280',fontSize:13}}>Nouveau flux</div>
-                <CashForm isNew init={{}} onSave={addCash} onCancel={()=>setCashAdding(false)} s={s} tickers={cashTickers}/>
+                <CashForm isNew init={cashEnvFilter!=='ALL'?{env:cashEnvFilter}:{}} onSave={addCash} onCancel={()=>setCashAdding(false)} s={s} tickers={cashTickers}/>
               </div>
             )}
 
@@ -980,46 +1010,61 @@ function App(){
               <div style={{overflowX:'auto'}}>
                 <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
                   <thead><tr>
-                    <th style={s.th}>Date</th><th style={s.th}>Enveloppe</th><th style={s.th}>Type</th><th style={s.th}>Montant €</th><th style={s.th}>Actions</th>
+                    <th style={s.th}>Date</th>
+                    {cashEnvFilter==='ALL'&&<th style={s.th}>Env.</th>}
+                    <th style={s.th}>Opération</th><th style={s.th}>Montant €</th>
+                    {cashEnvFilter!=='ALL'&&<th style={s.th}>Solde €</th>}
+                    <th style={s.th}>Actions</th>
                   </tr></thead>
                   <tbody>
-                    {cashFlows.length===0&&<tr><td colSpan={5} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>Aucun apport/retrait — commencez par un apport sur l'enveloppe concernée</td></tr>}
-                    {[...cashFlows].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(cf=>(
-                      <Fragment key={cf.id}>
-                        {cashEditId===cf.id?(
-                          <tr><td colSpan={5} style={{padding:16,background:'#FAFAF8'}}>
-                            <CashForm init={cf} onSave={updCash} onCancel={()=>setCashEditId(null)} s={s} tickers={cashTickers}/>
-                          </td></tr>
-                        ):cashDelId===cf.id?(
-                          <tr style={{background:'#FEF2F2'}}>
-                            <td colSpan={5} style={{...s.td,padding:'12px 16px'}}>
-                              <span style={{color:'#DC2626'}}>Supprimer ce flux ({cf.env} · {fmtEUR(num(cf.montant))}) ?</span>
-                              <button style={{...s.btn,background:'#DC2626',color:'#fff',marginLeft:14,padding:'3px 12px',fontSize:12}} onClick={()=>delCash(cf.id)}>Confirmer</button>
-                              <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',marginLeft:6,padding:'3px 12px',fontSize:12}} onClick={()=>setCashDelId(null)}>Annuler</button>
-                            </td>
-                          </tr>
-                        ):(
-                          <tr onMouseEnter={e=>e.currentTarget.style.background='#FAFAF8'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                            <td style={{...s.td,color:'#6B7280'}}>{fmtDate(cf.date)}</td>
-                            <td style={s.td}><Badge text={cf.env} color={ENV_CLR[cf.env]}/></td>
-                            <td style={{...s.td,color:cf.type==='retrait'?'#DC2626':'#16A34A',fontWeight:600}}>
-                              {cf.type==='retrait'?'Retrait':cf.type==='dividende'?'Dividende':'Apport'}
-                              {cf.type==='dividende'&&cf.ticker&&<span style={{color:'#6B7280',fontWeight:400}}> · {cf.ticker}</span>}
-                            </td>
-                            <td style={s.td}>{m((cf.type==='retrait'?'−':'+')+fmtEUR(num(cf.montant)))}</td>
-                            <td style={s.td}>
+                    {cashLedger.length===0&&<tr><td colSpan={6} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>Aucun mouvement de cash — commencez par un apport sur l'enveloppe concernée</td></tr>}
+                    {cashLedger.map((e,idx)=>{
+                      const isCash=e.source==='cash';
+                      if(isCash&&cashEditId===e.id) return(
+                        <tr key={'e'+idx}><td colSpan={6} style={{padding:16,background:'#FAFAF8'}}>
+                          <CashForm init={e.raw} onSave={updCash} onCancel={()=>setCashEditId(null)} s={s} tickers={cashTickers}/>
+                        </td></tr>
+                      );
+                      if(isCash&&cashDelId===e.id) return(
+                        <tr key={'e'+idx} style={{background:'#FEF2F2'}}>
+                          <td colSpan={6} style={{...s.td,padding:'12px 16px'}}>
+                            <span style={{color:'#DC2626'}}>Supprimer ce flux ({e.env} · {KIND_LBL[e.kind]} · {fmtEUR(Math.abs(e.amount))}) ?</span>
+                            <button style={{...s.btn,background:'#DC2626',color:'#fff',marginLeft:14,padding:'3px 12px',fontSize:12}} onClick={()=>delCash(e.id)}>Confirmer</button>
+                            <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',marginLeft:6,padding:'3px 12px',fontSize:12}} onClick={()=>setCashDelId(null)}>Annuler</button>
+                          </td>
+                        </tr>
+                      );
+                      return(
+                        <tr key={'e'+idx} onMouseEnter={ev=>ev.currentTarget.style.background='#FAFAF8'} onMouseLeave={ev=>ev.currentTarget.style.background='transparent'}>
+                          <td style={{...s.td,color:'#6B7280'}}>{fmtDate(e.date)}</td>
+                          {cashEnvFilter==='ALL'&&<td style={s.td}><Badge text={e.env} color={ENV_CLR[e.env]}/></td>}
+                          <td style={s.td}>
+                            <span style={{fontWeight:600,color:e.amount>=0?'#16A34A':'#DC2626'}}>{KIND_LBL[e.kind]}</span>
+                            {e.label&&<span style={{color:'#6B7280'}}> · {e.label}</span>}
+                            {e.source==='trade'&&<span style={{fontSize:10,color:'#9CA3AF',marginLeft:6}}>(trade)</span>}
+                          </td>
+                          <td style={{...s.td,fontWeight:600,color:e.amount>=0?'#16A34A':'#DC2626'}}>{m((e.amount>=0?'+':'−')+fmtEUR(Math.abs(e.amount)))}</td>
+                          {cashEnvFilter!=='ALL'&&<td style={{...s.td,color:e.solde<0?'#DC2626':'#6B7280',fontWeight:600}}>{m(fmtEUR(e.solde))}</td>}
+                          <td style={s.td}>
+                            {isCash?(
                               <div style={{display:'flex',gap:4}}>
-                                <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 10px',fontSize:12}} onClick={()=>{setCashEditId(cf.id);setCashAdding(false);}}>✏️</button>
-                                <button style={{...s.btn,background:'#FEE2E2',color:'#DC2626',padding:'3px 10px',fontSize:12}} onClick={()=>setCashDelId(cf.id)}>🗑️</button>
+                                <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 10px',fontSize:12}} onClick={()=>{setCashEditId(e.id);setCashAdding(false);}}>✏️</button>
+                                <button style={{...s.btn,background:'#FEE2E2',color:'#DC2626',padding:'3px 10px',fontSize:12}} onClick={()=>setCashDelId(e.id)}>🗑️</button>
                               </div>
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
-                    ))}
+                            ):(
+                              <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 10px',fontSize:12}} title="Modifier dans l'Éditeur"
+                                onClick={()=>{setEditId(e.posId);setTab('editeur');}}>→ Éditeur</button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
+              {cashEnvFilter!=='ALL'&&cashLedger.length>0&&(
+                <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>Solde cumulé chronologique — la dernière ligne = solde actuel de l'enveloppe {cashEnvFilter} ({m(fmtEUR(cashByEnv[cashEnvFilter]))})</div>
+              )}
             </div>
           </div>
         )}
