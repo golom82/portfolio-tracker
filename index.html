@@ -35,8 +35,10 @@ const { useState, useEffect, Fragment } = React;
 
 const CATS    = ['Défensif','Quality Core','Quality Satellite','Outsider'];
 const ENVS    = ['PEA','CTO','PER'];
-const CAT_CLR = {'Défensif':'#0D9488','Quality Core':'#2563EB','Quality Satellite':'#7C3AED','Outsider':'#D97706'};
+const CAT_CLR = {'Défensif':'#0D9488','Quality Core':'#2563EB','Quality Satellite':'#7C3AED','Outsider':'#D97706','Liquidités':'#64748B'};
 const ENV_CLR = {PEA:'#059669',CTO:'#2563EB',PER:'#EA580C'};
+const CASH_CLR = '#64748B';
+const CASH_TYPES = ['apport','retrait'];      // apport = +cash, retrait = −cash (dividende/frais à venir si besoin)
 const FX_TICKERS = ['EURUSD=X','EURCAD=X','EURDKK=X'];
 
 // Seed — catégories migrées vers le nouveau schéma. Mouvements vides : à renseigner via l'éditeur.
@@ -304,9 +306,40 @@ function WlForm({init,onSave,onCancel,s}){
   );
 }
 
+function CashForm({init,onSave,onCancel,isNew=false,s}){
+  const [f,setF]=useState({env:'CTO',date:new Date().toISOString().slice(0,10),type:'apport',montant:'',...init});
+  const upd=(k,v)=>setF(p=>({...p,[k]:v}));
+  return(
+    <div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(140px,1fr))',gap:12}}>
+        <div><label style={s.lbl}>Enveloppe</label>
+          <select style={s.inp} value={f.env} onChange={e=>upd('env',e.target.value)}>{ENVS.map(e=><option key={e}>{e}</option>)}</select>
+        </div>
+        <div><label style={s.lbl}>Date</label>
+          <input style={s.inp} type="date" value={f.date||''} onChange={e=>upd('date',e.target.value)}/>
+        </div>
+        <div><label style={s.lbl}>Type</label>
+          <select style={{...s.inp,color:f.type==='retrait'?'#DC2626':'#16A34A',fontWeight:600}} value={f.type} onChange={e=>upd('type',e.target.value)}>
+            <option value="apport">Apport (+)</option>
+            <option value="retrait">Retrait (−)</option>
+          </select>
+        </div>
+        <div><label style={s.lbl}>Montant (€)</label>
+          <input style={s.inp} type="text" inputMode="decimal" placeholder="ex. 5 000,00" value={f.montant??''} onChange={e=>upd('montant',e.target.value)}/>
+        </div>
+      </div>
+      <div style={{display:'flex',gap:8,marginTop:14}}>
+        <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>onSave({...f,montant:num(f.montant)})}>{isNew?'+ Ajouter':'✓ Sauvegarder'}</button>
+        <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280'}} onClick={onCancel}>Annuler</button>
+      </div>
+    </div>
+  );
+}
+
 function App(){
   const [pos,       setPos]       = useState([]);
   const [wl,        setWl]        = useState([]);
+  const [cashFlows, setCashFlows] = useState([]);
   const [prices,    setPrices]    = useState({});
   const [fx,        setFX]        = useState({});
   const [loading,   setLoading]   = useState(true);
@@ -323,6 +356,10 @@ function App(){
   const [wlAdding,  setWlAdding]  = useState(false);
   const [wlEditId,  setWlEditId]  = useState(null);
   const [hideAmt,   setHideAmt]   = useState(false);     // masquage des montants
+  const [inclCash,  setInclCash]  = useState(true);      // inclure le cash dans l'allocation valo
+  const [cashAdding,setCashAdding]= useState(false);
+  const [cashEditId,setCashEditId]= useState(null);
+  const [cashDelId, setCashDelId] = useState(null);
 
   const m = v => hideAmt ? '•••' : v;                    // helper de masquage
 
@@ -375,6 +412,8 @@ function App(){
     const {data:wlData}=await db.from('watchlist').select('*').order('id');
     const watchlist=wlData||[];
     setWl(watchlist);
+    const {data:cashData}=await db.from('cash_flows').select('*').order('id');
+    setCashFlows(cashData||[]);
     await doFetch(positions,watchlist);
     setLoading(false);
   }
@@ -419,6 +458,11 @@ function App(){
   async function updWl(f){await db.from('watchlist').update(f).eq('id',f.id);const u=wl.map(x=>x.id===f.id?f:x);setWl(u);setWlEditId(null);doFetch(pos,u);}
   async function delWl(id){await db.from('watchlist').delete().eq('id',id);setWl(wl.filter(x=>x.id!==id));}
 
+  // Cash CRUD
+  async function addCash(f){const {data}=await db.from('cash_flows').insert([f]).select();if(data)setCashFlows([...cashFlows,...data]);setCashAdding(false);}
+  async function updCash(f){await db.from('cash_flows').update(f).eq('id',f.id);setCashFlows(cashFlows.map(x=>x.id===f.id?f:x));setCashEditId(null);}
+  async function delCash(id){await db.from('cash_flows').delete().eq('id',id);setCashFlows(cashFlows.filter(x=>x.id!==id));setCashDelId(null);}
+
   // Toggle d'une cible (pc1_on/pc2_on/pc3_on) sur la bonne table
   async function setPcFlag(line,key,val){
     if(line.wlType==='watch'){
@@ -456,6 +500,20 @@ function App(){
   const grouped =CATS.map(cat=>({cat,items:filtered.filter(p=>p.cat===cat)})).filter(g=>g.items.length>0);
   const totalValEUR =held.reduce((a,p)=>a+(calc[p.id].valEUR||0),0);
   const totalInvEUR =held.reduce((a,p)=>a+(calc[p.id].investedEUR||0),0);
+
+  // ── Cash par enveloppe = Σapports − Σretraits − Σachats(env) + Σventes(env) ──
+  const cashByEnv={}; ENVS.forEach(e=>cashByEnv[e]=0);
+  cashFlows.forEach(c=>{ if(cashByEnv[c.env]!=null) cashByEnv[c.env]+= c.type==='retrait'?-num(c.montant):num(c.montant); });
+  pos.forEach(p=>{
+    if(cashByEnv[p.env]==null) return;
+    (Array.isArray(p.mouvements)?p.mouvements:[]).forEach(mvt=>{
+      const mt=num(mvt.montant);
+      cashByEnv[p.env]+= mvt.type==='vente'? mt : -mt;
+    });
+  });
+  const totalCash = ENVS.reduce((a,e)=>a+cashByEnv[e],0);
+  const grandTotal = totalValEUR + totalCash;          // titres + cash
+
   const catWeight = cat => {
     const v=held.filter(p=>p.cat===cat).reduce((a,p)=>a+(calc[p.id].valEUR||0),0);
     return totalValEUR>0?(v/totalValEUR)*100:0;
@@ -471,11 +529,15 @@ function App(){
     if(!byTicker[p.ticker].envs.includes(p.env)) byTicker[p.ticker].envs.push(p.env);
   });
   const posRankedEUR=Object.values(byTicker).sort((a,b)=>b.valEUR-a.valEUR);
-  const byEnv=ENVS.map(e=>({name:e,value:Math.round(held.filter(p=>p.env===e).reduce((a,p)=>a+(calc[p.id].valEUR||0),0))})).filter(x=>x.value>0);
-  const byCat=CATS.map(c=>({name:c,value:Math.round(held.filter(p=>p.cat===c).reduce((a,p)=>a+(calc[p.id].valEUR||0),0))})).filter(x=>x.value>0);
+  // Allocation par enveloppe : valo titres (+ cash si activé)
+  const byEnv=ENVS.map(e=>({name:e,value:Math.round(held.filter(p=>p.env===e).reduce((a,p)=>a+(calc[p.id].valEUR||0),0)+(inclCash?cashByEnv[e]:0))})).filter(x=>x.value>0);
+  // Allocation par catégorie : titres + une part Liquidités si activé
+  const byCat=CATS.map(c=>({name:c,value:Math.round(held.filter(p=>p.cat===c).reduce((a,p)=>a+(calc[p.id].valEUR||0),0))}))
+    .concat(inclCash&&totalCash>0?[{name:'Liquidités',value:Math.round(totalCash)}]:[]).filter(x=>x.value>0);
   const byTitleInv=posRankedEUR.filter(p=>p.invEUR>0).map(p=>({name:p.ticker,value:Math.round(p.invEUR),cat:p.cat})).sort((a,b)=>b.value-a.value);
-  const byTitleVal=posRankedEUR.filter(p=>p.valEUR>0).map(p=>({name:p.ticker,value:Math.round(p.valEUR),cat:p.cat})).sort((a,b)=>b.value-a.value);
-  const titleColors={}; [...new Set([...byTitleInv,...byTitleVal].map(x=>x.name))].forEach((t,i)=>{titleColors[t]=sliceColor(i);});
+  const byTitleVal=posRankedEUR.filter(p=>p.valEUR>0).map(p=>({name:p.ticker,value:Math.round(p.valEUR),cat:p.cat})).sort((a,b)=>b.value-a.value)
+    .concat(inclCash?ENVS.filter(e=>cashByEnv[e]>0).map(e=>({name:'Cash '+e,value:Math.round(cashByEnv[e]),cat:'Liquidités'})):[]);
+  const titleColors={}; [...new Set([...byTitleInv,...byTitleVal].map(x=>x.name))].forEach((t,i)=>{titleColors[t]=t.startsWith('Cash ')?CASH_CLR:sliceColor(i);});
 
   // ── Watchlist fusionnée, avec cible sélectionnable ──
   const targetIdx = l => (l.pc1_on!==false?1:l.pc2_on!==false?2:l.pc3_on!==false?3:1);
@@ -523,18 +585,21 @@ function App(){
 
       {/* Summary */}
       <div style={{display:'flex',gap:10,padding:'12px 24px',background:'#FFFFFF',borderBottom:'1px solid #EEEDE9',overflowX:'auto'}}>
-        {[{l:'Positions',v:held.length},{l:'PEA',v:held.filter(p=>p.env==='PEA').length+' pos.'},{l:'CTO',v:held.filter(p=>p.env==='CTO').length+' pos.'},{l:'PER',v:held.filter(p=>p.env==='PER').length+' pos.'},{l:'Valeur totale (€)',v:totalValEUR>0?m(fmtEUR(totalValEUR)):'—'}]
-          .map(({l,v})=>(
+        {[{l:'Positions',v:held.length},{l:'PEA',v:held.filter(p=>p.env==='PEA').length+' pos.'},{l:'CTO',v:held.filter(p=>p.env==='CTO').length+' pos.'},{l:'PER',v:held.filter(p=>p.env==='PER').length+' pos.'},
+          {l:'Titres (€)',v:totalValEUR>0?m(fmtEUR(totalValEUR)):'—'},
+          {l:'Liquidités (€)',v:totalCash!==0?m(fmtEUR(totalCash)):'—',clr:totalCash<0?'#DC2626':null},
+          {l:'Total titres+cash (€)',v:grandTotal!==0?m(fmtEUR(grandTotal)):'—'}]
+          .map(({l,v,clr})=>(
           <div key={l} style={{flex:'none',minWidth:120,padding:'10px 14px',background:'#F7F6F3',borderRadius:10,border:'1px solid #EEEDE9'}}>
             <div style={{fontSize:10,color:'#9CA3AF',marginBottom:4,textTransform:'uppercase',letterSpacing:'0.05em'}}>{l}</div>
-            <div style={{fontWeight:700,fontSize:15}}>{v}</div>
+            <div style={{fontWeight:700,fontSize:15,color:clr||'#191919'}}>{v}</div>
           </div>
         ))}
       </div>
 
       {/* Tabs */}
       <div style={{display:'flex',gap:2,padding:'10px 24px',background:'#FFFFFF',borderBottom:'1px solid #EEEDE9',flexWrap:'wrap'}}>
-        {[{id:'portfolio',l:'📋 Portefeuille'},{id:'watchlist',l:'👁 Watchlist'},{id:'allocation',l:'🥧 Allocation'},{id:'sortis',l:'📤 Sortis'},{id:'editeur',l:'✏️ Éditeur'}].map(({id,l})=>(
+        {[{id:'portfolio',l:'📋 Portefeuille'},{id:'watchlist',l:'👁 Watchlist'},{id:'allocation',l:'🥧 Allocation'},{id:'cash',l:'💶 Liquidités'},{id:'sortis',l:'📤 Sortis'},{id:'editeur',l:'✏️ Éditeur'}].map(({id,l})=>(
           <button key={id} onClick={()=>setTab(id)}
             style={{...s.btn,background:tab===id?'#191919':'transparent',color:tab===id?'#FFFFFF':'#6B7280',padding:'7px 16px'}}>
             {l}{id==='sortis'&&exited.length>0?` (${exited.length})`:''}
@@ -750,9 +815,18 @@ function App(){
         {/* ── ALLOCATION ── */}
         {tab==='allocation'&&(
           <div>
+            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
+              <button style={{...s.btn,background:inclCash?'#64748B':'#F0EFE9',color:inclCash?'#fff':'#6B7280'}}
+                onClick={()=>setInclCash(!inclCash)}>
+                {inclCash?'✓ Cash inclus':'Cash exclu'}
+              </button>
+              <span style={{fontSize:12,color:'#9CA3AF'}}>
+                Affecte uniquement les graphiques de <strong>valorisation</strong> (enveloppe, catégorie, titre). La somme investie reste hors cash.
+              </span>
+            </div>
             {/* Camemberts par titre : investi vs valorisation */}
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
-              {[{title:'Pondération par titre — somme investie',data:byTitleInv},{title:'Pondération par titre — valorisation',data:byTitleVal}].map(({title,data})=>{
+              {[{title:'Pondération par titre — somme investie',data:byTitleInv},{title:'Pondération par titre — valorisation'+(inclCash?' (cash inclus)':''),data:byTitleVal}].map(({title,data})=>{
                 const tot=data.reduce((a,d)=>a+d.value,0);
                 return(
                   <div key={title} style={s.card}>
@@ -824,6 +898,93 @@ function App(){
                           ):<span style={{color:'#D1D5DB'}}>—</span>}
                         </td>
                       </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── LIQUIDITÉS ── */}
+        {tab==='cash'&&(
+          <div>
+            {/* Soldes par enveloppe */}
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))',gap:12,marginBottom:20}}>
+              {ENVS.map(e=>{
+                const bal=cashByEnv[e];
+                const envTotal=held.filter(p=>p.env===e).reduce((a,p)=>a+(calc[p.id].valEUR||0),0)+bal;
+                const pct=envTotal>0?(bal/envTotal)*100:0;
+                return(
+                  <div key={e} style={s.card}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                      <Badge text={e} color={ENV_CLR[e]}/>
+                      {bal<0&&<span style={{fontSize:10,color:'#DC2626',fontWeight:700}}>⚠ négatif</span>}
+                    </div>
+                    <div style={{fontSize:22,fontWeight:800,color:bal<0?'#DC2626':'#191919'}}>{m(fmtEUR(bal))}</div>
+                    <div style={{fontSize:11,color:'#9CA3AF',marginTop:4}}>{bal!==0?fmt(pct,1)+'% de l\u2019enveloppe en cash':'—'}</div>
+                  </div>
+                );
+              })}
+              <div style={{...s.card,background:'#191919',color:'#fff'}}>
+                <div style={{fontSize:11,color:'#9CA3AF',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.05em'}}>Cash total</div>
+                <div style={{fontSize:22,fontWeight:800,color:totalCash<0?'#FCA5A5':'#fff'}}>{m(fmtEUR(totalCash))}</div>
+                <div style={{fontSize:11,color:'#9CA3AF',marginTop:4}}>{grandTotal>0?fmt(totalCash/grandTotal*100,1)+'% du total':'—'}</div>
+              </div>
+            </div>
+
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+              <div>
+                <div style={{fontWeight:700,fontSize:16}}>Apports & retraits</div>
+                <div style={{fontSize:12,color:'#9CA3AF',marginTop:2}}>Argent versé ou retiré d'une enveloppe. Les achats/ventes ajustent le cash automatiquement, ne les saisissez pas ici.</div>
+              </div>
+              {!cashAdding&&<button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>{setCashAdding(true);setCashEditId(null);}}>+ Ajouter</button>}
+            </div>
+
+            {cashAdding&&(
+              <div style={{...s.card,marginBottom:16}}>
+                <div style={{fontWeight:600,marginBottom:12,color:'#6B7280',fontSize:13}}>Nouveau flux</div>
+                <CashForm isNew init={{}} onSave={addCash} onCancel={()=>setCashAdding(false)} s={s}/>
+              </div>
+            )}
+
+            <div style={s.card}>
+              <div style={{overflowX:'auto'}}>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                  <thead><tr>
+                    <th style={s.th}>Date</th><th style={s.th}>Enveloppe</th><th style={s.th}>Type</th><th style={s.th}>Montant €</th><th style={s.th}>Actions</th>
+                  </tr></thead>
+                  <tbody>
+                    {cashFlows.length===0&&<tr><td colSpan={5} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>Aucun apport/retrait — commencez par un apport sur l'enveloppe concernée</td></tr>}
+                    {[...cashFlows].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(cf=>(
+                      <Fragment key={cf.id}>
+                        {cashEditId===cf.id?(
+                          <tr><td colSpan={5} style={{padding:16,background:'#FAFAF8'}}>
+                            <CashForm init={cf} onSave={updCash} onCancel={()=>setCashEditId(null)} s={s}/>
+                          </td></tr>
+                        ):cashDelId===cf.id?(
+                          <tr style={{background:'#FEF2F2'}}>
+                            <td colSpan={5} style={{...s.td,padding:'12px 16px'}}>
+                              <span style={{color:'#DC2626'}}>Supprimer ce flux ({cf.env} · {fmtEUR(num(cf.montant))}) ?</span>
+                              <button style={{...s.btn,background:'#DC2626',color:'#fff',marginLeft:14,padding:'3px 12px',fontSize:12}} onClick={()=>delCash(cf.id)}>Confirmer</button>
+                              <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',marginLeft:6,padding:'3px 12px',fontSize:12}} onClick={()=>setCashDelId(null)}>Annuler</button>
+                            </td>
+                          </tr>
+                        ):(
+                          <tr onMouseEnter={e=>e.currentTarget.style.background='#FAFAF8'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                            <td style={{...s.td,color:'#6B7280'}}>{fmtDate(cf.date)}</td>
+                            <td style={s.td}><Badge text={cf.env} color={ENV_CLR[cf.env]}/></td>
+                            <td style={{...s.td,color:cf.type==='retrait'?'#DC2626':'#16A34A',fontWeight:600}}>{cf.type==='retrait'?'Retrait':'Apport'}</td>
+                            <td style={s.td}>{m((cf.type==='retrait'?'−':'+')+fmtEUR(num(cf.montant)))}</td>
+                            <td style={s.td}>
+                              <div style={{display:'flex',gap:4}}>
+                                <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 10px',fontSize:12}} onClick={()=>{setCashEditId(cf.id);setCashAdding(false);}}>✏️</button>
+                                <button style={{...s.btn,background:'#FEE2E2',color:'#DC2626',padding:'3px 10px',fontSize:12}} onClick={()=>setCashDelId(cf.id)}>🗑️</button>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>
