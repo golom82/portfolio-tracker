@@ -28,48 +28,60 @@
 const SUPABASE_URL      = 'https://mtrvcgicwcraqjxknoid.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im10cnZjZ2ljd2NyYXFqeGtub2lkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzk4NDksImV4cCI6MjA5MTkxNTg0OX0.F78OxlzPOIxpMhXkCFSA9Y96cJUUVpe6mw3S3aM6XJA';
 // ═══════════════════════════════════════════════════════
-
+ 
 const { createClient } = supabase;
 const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const { useState, useEffect, Fragment } = React;
-
-const CATS    = ['Core Quality','Quality Aggressive','Speculative'];
+ 
+const CATS    = ['Défensif','Quality Core','Quality Satellite','Outsider'];
 const ENVS    = ['PEA','CTO','PER'];
-const CAT_CLR = {'Core Quality':'#2563EB','Quality Aggressive':'#7C3AED','Speculative':'#D97706'};
+const CAT_CLR = {'Défensif':'#0D9488','Quality Core':'#2563EB','Quality Satellite':'#7C3AED','Outsider':'#D97706'};
 const ENV_CLR = {PEA:'#059669',CTO:'#2563EB',PER:'#EA580C'};
 const FX_TICKERS = ['EURUSD=X','EURCAD=X','EURDKK=X'];
-
+ 
+// Seed — catégories migrées vers le nouveau schéma. Mouvements vides : à renseigner via l'éditeur.
 const SEED = [
-  {ticker:'MSCI',     name:'MSCI Inc.',              env:'CTO',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'SPGI',     name:'S&P Global',             env:'CTO',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'CSU.TO',   name:'Constellation Software', env:'CTO',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'MSFT',     name:'Microsoft',              env:'CTO',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'RACE.MI',  name:'Ferrari',                env:'PEA',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:25},
-  {ticker:'NOV.DE',   name:'Novo Nordisk',           env:'PEA',cat:'Core Quality',      qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'ASML',     name:'ASML',                   env:'PEA',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'ASM.AS',   name:'ASM International',      env:'PEA',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'TSM',      name:'TSMC',                   env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'GOOGL',    name:'Alphabet',               env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'AMZN',     name:'Amazon',                 env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'META',     name:'Meta',                   env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'NFLX',     name:'Netflix',                env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'ADYEN.AS', name:'Adyen',                  env:'PEA',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'BKNG',     name:'Booking Holdings',       env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:30},
-  {ticker:'TTD',      name:'The Trade Desk',         env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:35},
-  {ticker:'UBER',     name:'Uber',                   env:'CTO',cat:'Quality Aggressive',qte:0,pru:0,pc1:0,mos:35},
-  {ticker:'MELI',     name:'MercadoLibre',           env:'CTO',cat:'Speculative',       qte:0,pru:0,pc1:0,mos:35},
-  {ticker:'NEU.PA',   name:'Neurone',                env:'PEA',cat:'Speculative',       qte:0,pru:0,pc1:0,mos:35},
+  {ticker:'MSCI',     name:'MSCI Inc.',              env:'CTO',cat:'Quality Core',     pc1:0,mos:30,mouvements:[]},
+  {ticker:'SPGI',     name:'S&P Global',             env:'CTO',cat:'Quality Core',     pc1:0,mos:30,mouvements:[]},
+  {ticker:'CSU.TO',   name:'Constellation Software', env:'CTO',cat:'Quality Core',     pc1:0,mos:30,mouvements:[]},
+  {ticker:'MSFT',     name:'Microsoft',              env:'CTO',cat:'Quality Core',     pc1:0,mos:30,mouvements:[]},
+  {ticker:'RACE.MI',  name:'Ferrari',                env:'PEA',cat:'Quality Core',     pc1:0,mos:25,mouvements:[]},
+  {ticker:'NOV.DE',   name:'Novo Nordisk',           env:'PEA',cat:'Quality Core',     pc1:0,mos:30,mouvements:[]},
+  {ticker:'ASML',     name:'ASML',                   env:'PEA',cat:'Quality Satellite',pc1:0,mos:30,mouvements:[]},
+  {ticker:'ASM.AS',   name:'ASM International',      env:'PEA',cat:'Quality Satellite',pc1:0,mos:30,mouvements:[]},
+  {ticker:'TSM',      name:'TSMC',                   env:'CTO',cat:'Quality Satellite',pc1:0,mos:30,mouvements:[]},
+  {ticker:'GOOGL',    name:'Alphabet',               env:'CTO',cat:'Quality Satellite',pc1:0,mos:30,mouvements:[]},
+  {ticker:'AMZN',     name:'Amazon',                 env:'CTO',cat:'Quality Satellite',pc1:0,mos:30,mouvements:[]},
+  {ticker:'META',     name:'Meta',                   env:'CTO',cat:'Quality Satellite',pc1:0,mos:30,mouvements:[]},
+  {ticker:'NFLX',     name:'Netflix',                env:'CTO',cat:'Quality Satellite',pc1:0,mos:30,mouvements:[]},
+  {ticker:'ADYEN.AS', name:'Adyen',                  env:'PEA',cat:'Quality Satellite',pc1:0,mos:30,mouvements:[]},
+  {ticker:'BKNG',     name:'Booking Holdings',       env:'CTO',cat:'Quality Satellite',pc1:0,mos:30,mouvements:[]},
+  {ticker:'TTD',      name:'The Trade Desk',         env:'CTO',cat:'Quality Satellite',pc1:0,mos:35,mouvements:[]},
+  {ticker:'UBER',     name:'Uber',                   env:'CTO',cat:'Quality Satellite',pc1:0,mos:35,mouvements:[]},
+  {ticker:'MELI',     name:'MercadoLibre',           env:'CTO',cat:'Outsider',         pc1:0,mos:35,mouvements:[]},
+  {ticker:'NEU.PA',   name:'Neurone',                env:'PEA',cat:'Outsider',         pc1:0,mos:35,mouvements:[]},
 ];
-
+ 
 const fmt    = (n,d=2) => n==null?'—':Number(n).toLocaleString('fr-FR',{minimumFractionDigits:d,maximumFractionDigits:d});
 const fmtEUR = (n) => n==null?'—':fmt(n,0)+' €';
-const pClr   = n => n==null?'#9CA3AF':n>=0?'#16A34A':'#DC2626';
 const mosClr = n => n==null?'#9CA3AF':n>=15?'#16A34A':n>=0?'#D97706':'#DC2626';
-
+ 
+// Mois pleins (échus) écoulés depuis une date 'YYYY-MM-DD'
+function monthsElapsed(dateStr){
+  if(!dateStr) return null;
+  const d=new Date(dateStr+'T00:00:00');
+  if(isNaN(d.getTime())) return null;
+  const now=new Date();
+  let m=(now.getFullYear()-d.getFullYear())*12+(now.getMonth()-d.getMonth());
+  if(now.getDate()<d.getDate()) m--;          // mois pas encore révolu
+  return m<0?0:m;
+}
+const fmtDate = s => s ? new Date(s+'T00:00:00').toLocaleDateString('fr-FR') : '—';
+ 
 function Badge({text,color}){
   return <span style={{display:'inline-block',padding:'2px 7px',borderRadius:4,fontSize:11,fontWeight:600,background:color+'18',color}}>{text}</span>;
 }
-
+ 
 function MosBar({value,label}){
   const clr=mosClr(value);
   return(
@@ -84,7 +96,7 @@ function MosBar({value,label}){
     </div>
   );
 }
-
+ 
 function PcCard({label,pc,mos,cur}){
   const has=pc>0;
   const bg=!has?'#FAFAF8':mos>=0?'#F0FDF4':'#FEF2F2';
@@ -99,16 +111,16 @@ function PcCard({label,pc,mos,cur}){
     </div>
   );
 }
-
+ 
 function PieChart({data,colorMap,size=170}){
   const total=data.reduce((s,d)=>s+d.value,0);
-  if(!total) return <div style={{color:'#9CA3AF',textAlign:'center',padding:20,fontSize:12}}>Renseignez quantités et PRU</div>;
+  if(!total) return <div style={{color:'#9CA3AF',textAlign:'center',padding:20,fontSize:12}}>Renseignez les mouvements</div>;
   let cum=-Math.PI/2; const R=80,cx=100,cy=100;
-  const slices=data.map(d=>{
+  const slices=data.map((d,i)=>{
     const angle=(d.value/total)*2*Math.PI,a1=cum,a2=cum+angle; cum=a2;
     return{...d,x1:cx+R*Math.cos(a1),y1:cy+R*Math.sin(a1),x2:cx+R*Math.cos(a2),y2:cy+R*Math.sin(a2),
       large:angle>Math.PI?1:0,mx:cx+(R*.65)*Math.cos((a1+a2)/2),my:cy+(R*.65)*Math.sin((a1+a2)/2),
-      pct:Math.round(d.value/total*100),color:colorMap[d.name]||'#2563EB'};
+      pct:Math.round(d.value/total*100),color:(colorMap&&colorMap[d.name])||d.color||'#2563EB'};
   });
   return(
     <svg viewBox="0 0 200 200" style={{width:size,height:size}}>
@@ -121,26 +133,105 @@ function PieChart({data,colorMap,size=170}){
     </svg>
   );
 }
-
-const POS_FIELDS=[
-  {k:'ticker',l:'Ticker Yahoo',t:'text'},{k:'name',l:'Nom',t:'text'},
-  {k:'qte',l:'Quantité',t:'number'},{k:'pru',l:'PRU',t:'number'},
-  {k:'pc1',l:'Prix Cible 1',t:'number'},{k:'mos',l:'MoS requise %',t:'number'},
-];
+ 
+// Palette pour distinguer des titres de même catégorie dans les camemberts par titre
+const sliceColor = i => `hsl(${(i*53)%360} 58% 56%)`;
+ 
+// ── Recherche de ticker Yahoo Finance (via /api/search serverless) ──
+function TickerSearch({onPick}){
+  const [q,setQ]=useState('');
+  const [res,setRes]=useState([]);
+  const [busy,setBusy]=useState(false);
+  const [err,setErr]=useState(null);
+  async function run(){
+    const term=q.trim();
+    if(!term){setRes([]);return;}
+    setBusy(true);setErr(null);
+    try{
+      const r=await fetch(`/api/search?q=${encodeURIComponent(term)}`);
+      const d=await r.json();
+      setRes(d.quotes||[]);
+      if(!(d.quotes||[]).length) setErr('Aucun résultat');
+    }catch(e){ setErr('Recherche indisponible (backend requis)'); }
+    setBusy(false);
+  }
+  return(
+    <div style={{marginBottom:14,padding:12,background:'#FAFAF8',border:'1px solid #EEEDE9',borderRadius:8}}>
+      <label style={{fontSize:11,color:'#9CA3AF',marginBottom:4,display:'block'}}>🔍 Rechercher un ticker (nom de société ou symbole)</label>
+      <div style={{display:'flex',gap:6}}>
+        <input style={{flex:1,background:'#FFF',border:'1px solid #E0DED8',borderRadius:6,padding:'5px 8px',fontSize:13}}
+          value={q} placeholder="ex. Hermès, Novo, ASML…"
+          onChange={e=>setQ(e.target.value)} onKeyDown={e=>e.key==='Enter'&&run()}/>
+        <button style={{padding:'6px 14px',borderRadius:6,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,background:'#191919',color:'#fff'}}
+          onClick={run} disabled={busy}>{busy?'…':'Chercher'}</button>
+      </div>
+      {err&&<div style={{fontSize:11,color:'#DC2626',marginTop:6}}>{err}</div>}
+      {res.length>0&&(
+        <div style={{marginTop:8,maxHeight:200,overflowY:'auto',border:'1px solid #EEEDE9',borderRadius:6,background:'#FFF'}}>
+          {res.map((x,i)=>(
+            <div key={i} onClick={()=>{onPick(x);setRes([]);setQ('');}}
+              style={{display:'flex',justifyContent:'space-between',gap:8,padding:'7px 10px',cursor:'pointer',borderBottom:'1px solid #F7F6F3'}}
+              onMouseEnter={e=>e.currentTarget.style.background='#FAFAF8'}
+              onMouseLeave={e=>e.currentTarget.style.background='#FFF'}>
+              <div><strong style={{fontSize:13}}>{x.symbol}</strong> <span style={{fontSize:12,color:'#6B7280'}}>{x.name}</span></div>
+              <span style={{fontSize:11,color:'#9CA3AF',whiteSpace:'nowrap'}}>{x.exchange}{x.type?' · '+x.type:''}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+ 
+// ── Éditeur de mouvements (achats / ventes) ──
+function MovementsEditor({value,onChange,s}){
+  const mv=Array.isArray(value)?value:[];
+  const set=(i,k,v)=>{const n=mv.map((m,j)=>j===i?{...m,[k]:v}:m);onChange(n);};
+  const add=()=>onChange([...mv,{date:new Date().toISOString().slice(0,10),type:'achat',qte:0,prix:0}]);
+  const rm=i=>onChange(mv.filter((_,j)=>j!==i));
+  return(
+    <div style={{marginTop:8}}>
+      <div style={{fontSize:11,color:'#9CA3AF',marginBottom:6,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.05em'}}>Mouvements</div>
+      {mv.length===0&&<div style={{fontSize:12,color:'#D1D5DB',marginBottom:8}}>Aucun mouvement — ajoutez le premier achat.</div>}
+      {mv.map((m,i)=>(
+        <div key={i} style={{display:'grid',gridTemplateColumns:'130px 110px 1fr 1fr 32px',gap:6,marginBottom:6,alignItems:'center'}}>
+          <input style={s.inp} type="date" value={m.date||''} onChange={e=>set(i,'date',e.target.value)}/>
+          <select style={{...s.inp,color:m.type==='vente'?'#DC2626':'#16A34A',fontWeight:600}} value={m.type} onChange={e=>set(i,'type',e.target.value)}>
+            <option value="achat">Achat</option>
+            <option value="vente">Vente</option>
+          </select>
+          <input style={s.inp} type="number" placeholder="Qté" value={m.qte??''} onChange={e=>set(i,'qte',parseFloat(e.target.value)||0)}/>
+          <input style={s.inp} type="number" placeholder="Prix (devise native)" value={m.prix??''} onChange={e=>set(i,'prix',parseFloat(e.target.value)||0)}/>
+          <button style={{...s.btn,background:'#FEE2E2',color:'#DC2626',padding:'4px 0'}} onClick={()=>rm(i)}>✕</button>
+        </div>
+      ))}
+      <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',marginTop:4,fontSize:12,padding:'4px 12px'}} onClick={add}>+ Ajouter un mouvement</button>
+    </div>
+  );
+}
+ 
+const POS_TEXT_FIELDS=[{k:'ticker',l:'Ticker Yahoo',t:'text'},{k:'name',l:'Nom',t:'text'}];
+const POS_NUM_FIELDS =[{k:'pc1',l:'Prix Cible 1',t:'number'},{k:'mos',l:'MoS requise %',t:'number'}];
 const WL_FIELDS=[
   {k:'ticker',l:'Ticker Yahoo',t:'text'},{k:'name',l:'Nom',t:'text'},
   {k:'pc1',l:'Prix Cible 1',t:'number'},{k:'mos',l:'MoS requise %',t:'number'},
 ];
-
+ 
 function PosForm({init,onSave,onCancel,isNew=false,s}){
-  const [f,setF]=useState({...init});
+  const [f,setF]=useState({mouvements:[],...init});
   const upd=(k,v)=>setF(p=>({...p,[k]:v}));
+  // dates dérivées
+  const buyDates=(f.mouvements||[]).filter(m=>m.type!=='vente').map(m=>m.date).filter(Boolean).sort();
+  const allDates=(f.mouvements||[]).map(m=>m.date).filter(Boolean).sort();
+  const firstBuy=buyDates[0]||null;
+  const lastMove=allDates[allDates.length-1]||null;
   return(
     <div>
+      <TickerSearch onPick={x=>{upd('ticker',x.symbol);upd('name',x.name);}}/>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:12}}>
-        {POS_FIELDS.map(({k,l,t})=>(
+        {POS_TEXT_FIELDS.map(({k,l,t})=>(
           <div key={k}><label style={s.lbl}>{l}</label>
-            <input style={s.inp} type={t} value={f[k]??''} onChange={e=>upd(k,t==='number'?parseFloat(e.target.value)||0:e.target.value)}/>
+            <input style={s.inp} type={t} value={f[k]??''} onChange={e=>upd(k,e.target.value)}/>
           </div>
         ))}
         <div><label style={s.lbl}>Enveloppe</label>
@@ -153,6 +244,16 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
             {CATS.map(c=><option key={c}>{c}</option>)}
           </select>
         </div>
+        {POS_NUM_FIELDS.map(({k,l,t})=>(
+          <div key={k}><label style={s.lbl}>{l}</label>
+            <input style={s.inp} type={t} value={f[k]??''} onChange={e=>upd(k,parseFloat(e.target.value)||0)}/>
+          </div>
+        ))}
+      </div>
+      <MovementsEditor value={f.mouvements} onChange={v=>upd('mouvements',v)} s={s}/>
+      <div style={{display:'flex',gap:16,marginTop:10,fontSize:11,color:'#9CA3AF'}}>
+        <span>Premier achat : <strong style={{color:'#6B7280'}}>{fmtDate(firstBuy)}</strong></span>
+        <span>Dernier mouvement : <strong style={{color:'#6B7280'}}>{fmtDate(lastMove)}</strong></span>
       </div>
       <div style={{display:'flex',gap:8,marginTop:14}}>
         <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>onSave(f)}>{isNew?'+ Ajouter':'✓ Sauvegarder'}</button>
@@ -161,18 +262,24 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
     </div>
   );
 }
-
+ 
 function WlForm({init,onSave,onCancel,s}){
-  const [f,setF]=useState({...init});
+  const [f,setF]=useState({cat:'Quality Core',...init});
   const upd=(k,v)=>setF(p=>({...p,[k]:v}));
   return(
     <div>
+      <TickerSearch onPick={x=>{upd('ticker',x.symbol);upd('name',x.name);}}/>
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:12}}>
         {WL_FIELDS.map(({k,l,t})=>(
           <div key={k}><label style={s.lbl}>{l}</label>
             <input style={s.inp} type={t} value={f[k]??''} onChange={e=>upd(k,t==='number'?parseFloat(e.target.value)||0:e.target.value)}/>
           </div>
         ))}
+        <div><label style={s.lbl}>Catégorie</label>
+          <select style={s.inp} value={f.cat} onChange={e=>upd('cat',e.target.value)}>
+            {CATS.map(c=><option key={c}>{c}</option>)}
+          </select>
+        </div>
       </div>
       <div style={{display:'flex',gap:8,marginTop:14}}>
         <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>onSave(f)}>✓ Sauvegarder</button>
@@ -181,7 +288,7 @@ function WlForm({init,onSave,onCancel,s}){
     </div>
   );
 }
-
+ 
 function App(){
   const [pos,       setPos]       = useState([]);
   const [wl,        setWl]        = useState([]);
@@ -200,33 +307,49 @@ function App(){
   const [fCat,      setFCat]      = useState('ALL');
   const [wlAdding,  setWlAdding]  = useState(false);
   const [wlEditId,  setWlEditId]  = useState(null);
-
+  const [hideAmt,   setHideAmt]   = useState(false);     // masquage des montants
+ 
+  const m = v => hideAmt ? '•••' : v;                    // helper de masquage
+ 
   const toEUR=(amount,currency)=>{
-    if(!amount) return null;
+    if(amount==null) return null;
     if(!currency||currency==='EUR') return amount;
     if(currency==='USD') return fx['EURUSD=X']?amount/fx['EURUSD=X']:null;
     if(currency==='CAD') return fx['EURCAD=X']?amount/fx['EURCAD=X']:null;
     if(currency==='DKK') return fx['EURDKK=X']?amount/fx['EURDKK=X']:null;
     return amount;
   };
-
+ 
   function calcPos(p){
-    const px=prices[p.ticker],cours=px?.p??null,cur=px?.c??'';
+    const mv=Array.isArray(p.mouvements)?p.mouvements:[];
+    const px=prices[p.ticker], cours=px?.p??null, cur=px?.c??'';
+    let buyQ=0,buyCost=0,sellQ=0;
+    mv.forEach(x=>{
+      const q=Number(x.qte)||0, pr=Number(x.prix)||0;
+      if(x.type==='vente') sellQ+=q; else {buyQ+=q;buyCost+=q*pr;}
+    });
+    const qte=buyQ-sellQ;
+    const pmp=buyQ>0?buyCost/buyQ:0;
+    const investedNat=qte>0?qte*pmp:0;
+    const investedEUR=toEUR(investedNat,cur);
+    const valNat=cours&&qte>0?cours*qte:0;
+    const valEUR=toEUR(valNat,cur);
+    const buyDates=mv.filter(x=>x.type!=='vente').map(x=>x.date).filter(Boolean).sort();
+    const firstBuy=buyDates[0]||null;
+    let last=null,lastType=null;
+    mv.forEach(x=>{ if(x.date&&(last==null||x.date>=last)){last=x.date;lastType=x.type;} });
+    const holdM=monthsElapsed(firstBuy);
+    const sinceM=monthsElapsed(last);
     const pc2=p.pc1>0?p.pc1*(1-p.mos/200):0;
     const pc3=p.pc1>0?p.pc1*(1-p.mos/100):0;
-    const pl_pct=cours&&p.pru?((cours-p.pru)/p.pru)*100:null;
-    const pl_abs=cours&&p.pru&&p.qte?(cours-p.pru)*p.qte:null;
-    const pl_eur=toEUR(pl_abs,cur);
     const mos1=cours&&p.pc1?((p.pc1-cours)/p.pc1)*100:null;
     const mos2=cours&&pc2?((pc2-cours)/pc2)*100:null;
     const mos3=cours&&pc3?((pc3-cours)/pc3)*100:null;
-    const val=cours&&p.qte?cours*p.qte:null;
-    const valEUR=toEUR(val,cur);
-    return {cours,cur,pc2,pc3,pl_pct,pl_abs,pl_eur,mos1,mos2,mos3,val,valEUR};
+    return {mv,cours,cur,qte,pmp,investedNat,investedEUR,valNat,valEUR,firstBuy,last,lastType,holdM,sinceM,pc2,pc3,mos1,mos2,mos3};
   }
-
+ 
   useEffect(()=>{init();},[]);
-
+ 
   async function init(){
     const {data:posData,error:e1}=await db.from('positions').select('*').order('id');
     if(e1){setError('Supabase: '+e1.message);setLoading(false);return;}
@@ -242,7 +365,7 @@ function App(){
     await doFetch(positions,watchlist);
     setLoading(false);
   }
-
+ 
   async function doFetch(p,w){
     setFetching(true);setError(null);
     const positions=p||pos, watchlist=w||wl;
@@ -259,7 +382,7 @@ function App(){
     }catch(e){setError('Erreur : '+e.message);}
     setFetching(false);
   }
-
+ 
   async function fetchAllPrices(tickers){
     const BATCH=10,px={};
     for(let i=0;i<tickers.length;i+=BATCH){
@@ -272,19 +395,30 @@ function App(){
     }
     return px;
   }
-
+ 
   // Positions CRUD
   async function addPos(f){const {data}=await db.from('positions').insert([f]).select();if(data){const u=[...pos,...data];setPos(u);doFetch(u,wl);}setAddNew(false);}
   async function updPos(f){await db.from('positions').update(f).eq('id',f.id);const u=pos.map(x=>x.id===f.id?f:x);setPos(u);setEditId(null);doFetch(u,wl);}
   async function delPos(id){await db.from('positions').delete().eq('id',id);setPos(pos.filter(x=>x.id!==id));setDelId(null);}
-
+ 
   // Watchlist CRUD
   async function addWl(f){const {data}=await db.from('watchlist').insert([f]).select();if(data){const u=[...wl,...data];setWl(u);doFetch(pos,u);}setWlAdding(false);}
   async function updWl(f){await db.from('watchlist').update(f).eq('id',f.id);const u=wl.map(x=>x.id===f.id?f:x);setWl(u);setWlEditId(null);doFetch(pos,u);}
   async function delWl(id){await db.from('watchlist').delete().eq('id',id);setWl(wl.filter(x=>x.id!==id));}
-
+ 
+  // Toggle d'une cible (pc1_on/pc2_on/pc3_on) sur la bonne table
+  async function setPcFlag(line,key,val){
+    if(line.wlType==='watch'){
+      await db.from('watchlist').update({[key]:val}).eq('id',line.id);
+      setWl(wl.map(x=>x.id===line.id?{...x,[key]:val}:x));
+    }else{
+      await db.from('positions').update({[key]:val}).eq('id',line.id);
+      setPos(pos.map(x=>x.id===line.id?{...x,[key]:val}:x));
+    }
+  }
+ 
   const toggle=id=>setExpanded(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
-
+ 
   const s={
     btn: {padding:'6px 14px',borderRadius:6,border:'none',cursor:'pointer',fontSize:13,fontWeight:600},
     lbl: {fontSize:11,color:'#9CA3AF',marginBottom:4,display:'block'},
@@ -293,48 +427,68 @@ function App(){
     td:  {padding:'10px 12px',borderBottom:'1px solid #F7F6F3',verticalAlign:'middle'},
     card:{background:'#FFFFFF',borderRadius:12,padding:16,border:'1px solid #EEEDE9'},
   };
-
+ 
   if(loading) return(
     <div style={{display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#F7F6F3'}}>
       <div style={{textAlign:'center',color:'#9CA3AF'}}><div style={{fontSize:44,marginBottom:12}}>📊</div><div>Chargement...</div></div>
     </div>
   );
-
-  // Derived
-  const filtered =pos.filter(p=>(fEnv==='ALL'||p.env===fEnv)&&(fCat==='ALL'||p.cat===fCat));
-  const grouped  =CATS.map(cat=>({cat,items:filtered.filter(p=>p.cat===cat)})).filter(g=>g.items.length>0);
-  const totalEUR =pos.reduce((s,p)=>s+(calcPos(p).valEUR||0),0);
-
+ 
+  // ── Données dérivées ──
+  const calc = {}; pos.forEach(p=>{calc[p.id]=calcPos(p);});
+  const held    = pos.filter(p=>calc[p.id].qte>0);                 // en portefeuille
+  const exited  = pos.filter(p=>calc[p.id].qte<=0 && calc[p.id].mv.length>0); // sortis
+ 
+  const filtered=held.filter(p=>(fEnv==='ALL'||p.env===fEnv)&&(fCat==='ALL'||p.cat===fCat));
+  const grouped =CATS.map(cat=>({cat,items:filtered.filter(p=>p.cat===cat)})).filter(g=>g.items.length>0);
+  const totalValEUR =held.reduce((a,p)=>a+(calc[p.id].valEUR||0),0);
+  const totalInvEUR =held.reduce((a,p)=>a+(calc[p.id].investedEUR||0),0);
+  const catWeight = cat => {
+    const v=held.filter(p=>p.cat===cat).reduce((a,p)=>a+(calc[p.id].valEUR||0),0);
+    return totalValEUR>0?(v/totalValEUR)*100:0;
+  };
+ 
+  // Agrégation par ticker (allocation)
   const byTicker={};
-  pos.forEach(p=>{
-    const {valEUR}=calcPos(p);
-    if(!byTicker[p.ticker]) byTicker[p.ticker]={ticker:p.ticker,name:p.name,cat:p.cat,envs:[],valEUR:0};
-    byTicker[p.ticker].valEUR+=(valEUR||0);
+  held.forEach(p=>{
+    const c=calc[p.id];
+    if(!byTicker[p.ticker]) byTicker[p.ticker]={ticker:p.ticker,name:p.name,cat:p.cat,envs:[],valEUR:0,invEUR:0};
+    byTicker[p.ticker].valEUR+=(c.valEUR||0);
+    byTicker[p.ticker].invEUR+=(c.investedEUR||0);
     if(!byTicker[p.ticker].envs.includes(p.env)) byTicker[p.ticker].envs.push(p.env);
   });
   const posRankedEUR=Object.values(byTicker).sort((a,b)=>b.valEUR-a.valEUR);
-  const byEnv=ENVS.map(e=>({name:e,value:Math.round(pos.filter(p=>p.env===e).reduce((s,p)=>s+(calcPos(p).valEUR||0),0))})).filter(x=>x.value>0);
-  const byCat=CATS.map(c=>({name:c,value:Math.round(pos.filter(p=>p.cat===c).reduce((s,p)=>s+(calcPos(p).valEUR||0),0))})).filter(x=>x.value>0);
-
-  // Watchlist merged (portfolio + watchlist autonome), triée par marge PC1 décroissante
-  const seenTk=new Set();
-  const wlMerged=[];
-  pos.filter(p=>p.pc1>0).forEach(p=>{
+  const byEnv=ENVS.map(e=>({name:e,value:Math.round(held.filter(p=>p.env===e).reduce((a,p)=>a+(calc[p.id].valEUR||0),0))})).filter(x=>x.value>0);
+  const byCat=CATS.map(c=>({name:c,value:Math.round(held.filter(p=>p.cat===c).reduce((a,p)=>a+(calc[p.id].valEUR||0),0))})).filter(x=>x.value>0);
+  const byTitleInv=posRankedEUR.filter(p=>p.invEUR>0).map(p=>({name:p.ticker,value:Math.round(p.invEUR),cat:p.cat})).sort((a,b)=>b.value-a.value);
+  const byTitleVal=posRankedEUR.filter(p=>p.valEUR>0).map(p=>({name:p.ticker,value:Math.round(p.valEUR),cat:p.cat})).sort((a,b)=>b.value-a.value);
+  const titleColors={}; [...new Set([...byTitleInv,...byTitleVal].map(x=>x.name))].forEach((t,i)=>{titleColors[t]=sliceColor(i);});
+ 
+  // ── Watchlist fusionnée, avec cible sélectionnable ──
+  const targetIdx = l => (l.pc1_on!==false?1:l.pc2_on!==false?2:l.pc3_on!==false?3:1);
+  const seenTk=new Set(); const wlMerged=[];
+  pos.filter(p=>p.pc1>0 && calc[p.id].qte>0).forEach(p=>{
     if(!seenTk.has(p.ticker)){seenTk.add(p.ticker);wlMerged.push({...p,wlType:'portfolio'});}
   });
   wl.forEach(w=>{
-    if(!seenTk.has(w.ticker)){seenTk.add(w.ticker);wlMerged.push({...w,wlType:'watch',env:null,qte:0,pru:0});}
+    if(!seenTk.has(w.ticker)){seenTk.add(w.ticker);wlMerged.push({...w,wlType:'watch',env:null});}
   });
+  const lineMargins = l => {
+    const px=prices[l.ticker]?.p;
+    const pc2=l.pc1>0?l.pc1*(1-l.mos/200):0, pc3=l.pc1>0?l.pc1*(1-l.mos/100):0;
+    const mk=pc=>px&&pc?((pc-px)/pc)*100:null;
+    return {cours:px,cur:prices[l.ticker]?.c||'',pc2,pc3,mos1:mk(l.pc1),mos2:mk(pc2),mos3:mk(pc3)};
+  };
   wlMerged.sort((a,b)=>{
-    const px=t=>prices[t]?.p;
-    const ma=px(a.ticker)&&a.pc1?((a.pc1-px(a.ticker))/a.pc1)*100:-999;
-    const mb=px(b.ticker)&&b.pc1?((b.pc1-px(b.ticker))/b.pc1)*100:-999;
-    return mb-ma;
+    const ma=lineMargins(a), mb=lineMargins(b);
+    const va=[null,ma.mos1,ma.mos2,ma.mos3][targetIdx(a)];
+    const vb=[null,mb.mos1,mb.mos2,mb.mos3][targetIdx(b)];
+    return (vb==null?-999:vb)-(va==null?-999:va);
   });
-
+ 
   return(
     <div style={{background:'#F7F6F3',minHeight:'100vh',color:'#191919',fontFamily:'system-ui,sans-serif',fontSize:14}}>
-
+ 
       {/* Header */}
       <div style={{padding:'14px 24px',borderBottom:'1px solid #EEEDE9',display:'flex',alignItems:'center',justifyContent:'space-between',background:'#FFFFFF'}}>
         <div>
@@ -346,13 +500,17 @@ function App(){
         </div>
         <div style={{display:'flex',gap:8,alignItems:'center'}}>
           {error&&<span style={{color:'#DC2626',fontSize:12,maxWidth:260}}>⚠️ {error}</span>}
+          <button style={{...s.btn,background:hideAmt?'#191919':'#F0EFE9',color:hideAmt?'#fff':'#6B7280'}}
+            onClick={()=>setHideAmt(!hideAmt)} title="Masquer les montants pour présentation">
+            {hideAmt?'🙈 Montants masqués':'👁 Masquer montants'}
+          </button>
           <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280'}} onClick={()=>doFetch()} disabled={fetching}>⟳ Actualiser</button>
         </div>
       </div>
-
+ 
       {/* Summary */}
       <div style={{display:'flex',gap:10,padding:'12px 24px',background:'#FFFFFF',borderBottom:'1px solid #EEEDE9',overflowX:'auto'}}>
-        {[{l:'Positions',v:pos.length},{l:'PEA',v:pos.filter(p=>p.env==='PEA').length+' pos.'},{l:'CTO',v:pos.filter(p=>p.env==='CTO').length+' pos.'},{l:'PER',v:pos.filter(p=>p.env==='PER').length+' pos.'},{l:'Valeur totale (€)',v:totalEUR>0?fmtEUR(totalEUR):'—'}]
+        {[{l:'Positions',v:held.length},{l:'PEA',v:held.filter(p=>p.env==='PEA').length+' pos.'},{l:'CTO',v:held.filter(p=>p.env==='CTO').length+' pos.'},{l:'PER',v:held.filter(p=>p.env==='PER').length+' pos.'},{l:'Valeur totale (€)',v:totalValEUR>0?m(fmtEUR(totalValEUR)):'—'}]
           .map(({l,v})=>(
           <div key={l} style={{flex:'none',minWidth:120,padding:'10px 14px',background:'#F7F6F3',borderRadius:10,border:'1px solid #EEEDE9'}}>
             <div style={{fontSize:10,color:'#9CA3AF',marginBottom:4,textTransform:'uppercase',letterSpacing:'0.05em'}}>{l}</div>
@@ -360,19 +518,19 @@ function App(){
           </div>
         ))}
       </div>
-
+ 
       {/* Tabs */}
-      <div style={{display:'flex',gap:2,padding:'10px 24px',background:'#FFFFFF',borderBottom:'1px solid #EEEDE9'}}>
-        {[{id:'portfolio',l:'📋 Portefeuille'},{id:'watchlist',l:'👁 Watchlist'},{id:'allocation',l:'🥧 Allocation'},{id:'editeur',l:'✏️ Éditeur'}].map(({id,l})=>(
+      <div style={{display:'flex',gap:2,padding:'10px 24px',background:'#FFFFFF',borderBottom:'1px solid #EEEDE9',flexWrap:'wrap'}}>
+        {[{id:'portfolio',l:'📋 Portefeuille'},{id:'watchlist',l:'👁 Watchlist'},{id:'allocation',l:'🥧 Allocation'},{id:'sortis',l:'📤 Sortis'},{id:'editeur',l:'✏️ Éditeur'}].map(({id,l})=>(
           <button key={id} onClick={()=>setTab(id)}
             style={{...s.btn,background:tab===id?'#191919':'transparent',color:tab===id?'#FFFFFF':'#6B7280',padding:'7px 16px'}}>
-            {l}
+            {l}{id==='sortis'&&exited.length>0?` (${exited.length})`:''}
           </button>
         ))}
       </div>
-
+ 
       <div style={{padding:24}}>
-
+ 
         {/* ── PORTEFEUILLE ── */}
         {tab==='portfolio'&&(
           <div>
@@ -401,17 +559,18 @@ function App(){
                   <tr style={{background:'#FAFAF8'}}>
                     <th style={{...s.th,width:28}}></th>
                     <th style={s.th}>Titre</th><th style={s.th}>Env.</th><th style={s.th}>Qté</th>
-                    <th style={s.th}>PRU</th><th style={s.th}>Cours</th>
-                    <th style={s.th}>+/- %</th><th style={s.th}>+/- €</th><th style={s.th}>Valeur €</th>
+                    <th style={s.th}>Investi €</th><th style={s.th}>Valeur €</th>
+                    <th style={s.th}>Détention</th><th style={s.th}>Dern. mvt</th>
                   </tr>
                 </thead>
                 <tbody>
                   {grouped.map(({cat,items})=>(
                     <Fragment key={cat}>
-                      <tr><td colSpan={9} style={{padding:'6px 12px',background:'#F7F6F3',fontSize:10,fontWeight:700,color:CAT_CLR[cat],textTransform:'uppercase',letterSpacing:'0.08em'}}>▪ {cat}</td></tr>
+                      <tr><td colSpan={8} style={{padding:'6px 12px',background:'#F7F6F3',fontSize:10,fontWeight:700,color:CAT_CLR[cat],textTransform:'uppercase',letterSpacing:'0.08em'}}>
+                        ▪ {cat} <span style={{color:'#9CA3AF',marginLeft:6}}>· {items.length} titre{items.length>1?'s':''} · {fmt(catWeight(cat),1)}% du portefeuille</span>
+                      </td></tr>
                       {items.map(p=>{
-                        const {cours,cur,pc2,pc3,pl_pct,pl_eur,mos1,mos2,mos3,valEUR}=calcPos(p);
-                        const isExp=expanded.has(p.id);
+                        const c=calc[p.id]; const isExp=expanded.has(p.id);
                         return(
                           <Fragment key={p.id}>
                             <tr onClick={()=>toggle(p.id)} style={{cursor:'pointer'}}
@@ -420,19 +579,23 @@ function App(){
                               <td style={{...s.td,color:'#9CA3AF',fontSize:12}}>{isExp?'▾':'▸'}</td>
                               <td style={s.td}><div style={{fontWeight:600}}>{p.ticker}</div><div style={{fontSize:11,color:'#9CA3AF'}}>{p.name}</div></td>
                               <td style={s.td}><Badge text={p.env} color={ENV_CLR[p.env]}/></td>
-                              <td style={{...s.td,color:'#6B7280'}}>{p.qte||'—'}</td>
-                              <td style={{...s.td,color:'#6B7280'}}>{p.pru?fmt(p.pru)+' '+cur:'—'}</td>
-                              <td style={s.td}><span style={{fontWeight:600}}>{cours?fmt(cours):'—'}</span>{cur&&<span style={{fontSize:10,color:'#9CA3AF',marginLeft:4}}>{cur}</span>}</td>
-                              <td style={s.td}><span style={{color:pClr(pl_pct),fontWeight:600}}>{pl_pct==null?'—':(pl_pct>=0?'+':'')+fmt(pl_pct)+'%'}</span></td>
-                              <td style={s.td}><span style={{color:pClr(pl_eur),fontWeight:600}}>{pl_eur==null?'—':(pl_eur>=0?'+':'')+fmt(pl_eur,0)+' €'}</span></td>
-                              <td style={{...s.td,color:'#6B7280'}}>{valEUR?fmtEUR(valEUR):'—'}</td>
+                              <td style={{...s.td,color:'#6B7280'}}>{m(c.qte||'—')}</td>
+                              <td style={{...s.td,color:'#6B7280'}}>{c.investedEUR?m(fmtEUR(c.investedEUR)):'—'}</td>
+                              <td style={{...s.td,color:'#6B7280'}}>{c.valEUR?m(fmtEUR(c.valEUR)):'—'}</td>
+                              <td style={{...s.td,color:'#6B7280'}}>{c.holdM==null?'—':c.holdM+' mois'}</td>
+                              <td style={s.td}>
+                                {c.sinceM==null?'—':
+                                  <span style={{color:c.lastType==='vente'?'#DC2626':'#6B7280',fontWeight:c.lastType==='vente'?700:400}}>
+                                    {c.sinceM} mois{c.lastType==='vente'?' ↓vente':''}
+                                  </span>}
+                              </td>
                             </tr>
                             {isExp&&(
-                              <tr><td colSpan={9} style={{padding:'14px 24px',background:'#FAFAF8',borderBottom:'1px solid #EEEDE9'}}>
-                                <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'stretch'}}>
-                                  <PcCard label="PC1 — Prix juste" pc={p.pc1} mos={mos1} cur={cur}/>
-                                  <PcCard label={`PC2 — ½ MoS (${(p.mos/2).toFixed(0)}%)`} pc={pc2} mos={mos2} cur={cur}/>
-                                  <PcCard label={`PC3 — MoS pleine (${p.mos}%)`} pc={pc3} mos={mos3} cur={cur}/>
+                              <tr><td colSpan={8} style={{padding:'14px 24px',background:'#FAFAF8',borderBottom:'1px solid #EEEDE9'}}>
+                                <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'stretch',marginBottom:14}}>
+                                  <PcCard label="PC1 — Prix juste" pc={p.pc1} mos={c.mos1} cur={c.cur}/>
+                                  <PcCard label={`PC2 — ½ MoS (${(p.mos/2).toFixed(0)}%)`} pc={c.pc2} mos={c.mos2} cur={c.cur}/>
+                                  <PcCard label={`PC3 — MoS pleine (${p.mos}%)`} pc={c.pc3} mos={c.mos3} cur={c.cur}/>
                                   <div style={{marginLeft:8,alignSelf:'center'}}>
                                     <div style={{fontSize:11,color:'#9CA3AF'}}>MoS requise</div>
                                     <div style={{fontWeight:800,fontSize:22,marginTop:2}}>{p.mos}%</div>
@@ -440,6 +603,26 @@ function App(){
                                       onClick={e=>{e.stopPropagation();setEditId(p.id);setTab('editeur');}}>✏️ Modifier</button>
                                   </div>
                                 </div>
+                                {/* Détail des mouvements */}
+                                <div style={{fontSize:11,color:'#9CA3AF',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>Historique des mouvements</div>
+                                {c.mv.length===0?<div style={{fontSize:12,color:'#D1D5DB'}}>Aucun mouvement enregistré</div>:(
+                                  <table style={{borderCollapse:'collapse',fontSize:12,minWidth:340}}>
+                                    <thead><tr>
+                                      <th style={{...s.th,padding:'5px 12px'}}>Date</th><th style={{...s.th,padding:'5px 12px'}}>Type</th>
+                                      <th style={{...s.th,padding:'5px 12px'}}>Qté</th><th style={{...s.th,padding:'5px 12px'}}>Prix</th>
+                                    </tr></thead>
+                                    <tbody>
+                                      {[...c.mv].sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map((mvt,i)=>(
+                                        <tr key={i}>
+                                          <td style={{...s.td,padding:'5px 12px'}}>{fmtDate(mvt.date)}</td>
+                                          <td style={{...s.td,padding:'5px 12px',color:mvt.type==='vente'?'#DC2626':'#16A34A',fontWeight:600}}>{mvt.type==='vente'?'Vente':'Achat'}</td>
+                                          <td style={{...s.td,padding:'5px 12px'}}>{m(mvt.qte)}</td>
+                                          <td style={{...s.td,padding:'5px 12px'}}>{m(fmt(mvt.prix))} {c.cur}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                )}
                               </td></tr>
                             )}
                           </Fragment>
@@ -447,106 +630,97 @@ function App(){
                       })}
                     </Fragment>
                   ))}
-                  {grouped.length===0&&<tr><td colSpan={9} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>Aucune position</td></tr>}
+                  {grouped.length===0&&<tr><td colSpan={8} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>Aucune position en portefeuille</td></tr>}
                 </tbody>
               </table>
             </div>
-            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>▸ Cliquez sur une ligne pour afficher les prix cibles</div>
+            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>▸ Cliquez sur une ligne pour les prix cibles et l'historique des mouvements — 🔴 dernier mouvement = vente</div>
           </div>
         )}
-
+ 
         {/* ── WATCHLIST ── */}
         {tab==='watchlist'&&(
           <div>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
               <div>
                 <div style={{fontWeight:700,fontSize:16}}>Watchlist</div>
-                <div style={{fontSize:12,color:'#9CA3AF',marginTop:2}}>Triée par attractivité décroissante — marge vs PC1</div>
+                <div style={{fontSize:12,color:'#9CA3AF',marginTop:2}}>Triée par marge vers la cible active la plus haute — décochez PC1/PC2 pour viser un point d'entrée plus bas</div>
               </div>
               <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>{setWlAdding(!wlAdding);setWlEditId(null);}}>
                 {wlAdding?'✕ Annuler':'+ Ajouter'}
               </button>
             </div>
-
+ 
             {wlAdding&&(
               <div style={{...s.card,marginBottom:16}}>
                 <div style={{fontWeight:600,marginBottom:12,color:'#6B7280',fontSize:13}}>Nouveau titre</div>
-                <WlForm init={{ticker:'',name:'',pc1:0,mos:30}} onSave={addWl} onCancel={()=>setWlAdding(false)} s={s}/>
+                <WlForm init={{ticker:'',name:'',pc1:0,mos:30,cat:'Quality Core'}} onSave={addWl} onCancel={()=>setWlAdding(false)} s={s}/>
               </div>
             )}
-
             {wlEditId&&(
               <div style={{...s.card,marginBottom:16,borderLeft:'3px solid #CF6D56'}}>
                 <div style={{fontWeight:600,marginBottom:12,color:'#6B7280',fontSize:13}}>Modifier le titre</div>
-                <WlForm
-                  init={wl.find(x=>x.id===wlEditId)||{}}
-                  onSave={updWl}
-                  onCancel={()=>setWlEditId(null)}
-                  s={s}
-                />
+                <WlForm init={wl.find(x=>x.id===wlEditId)||{}} onSave={updWl} onCancel={()=>setWlEditId(null)} s={s}/>
               </div>
             )}
-
+ 
             <div style={{overflowX:'auto',borderRadius:12,border:'1px solid #EEEDE9',background:'#FFFFFF'}}>
               <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
                 <thead>
                   <tr style={{background:'#FAFAF8'}}>
                     <th style={{...s.th,width:36}}>#</th>
-                    <th style={s.th}>Titre</th><th style={s.th}>Type</th><th style={s.th}>Cours</th>
-                    <th style={s.th}>PC1</th><th style={s.th}>Marge PC1 ↓</th>
+                    <th style={s.th}>Titre</th><th style={s.th}>Catégorie</th><th style={s.th}>Type</th><th style={s.th}>Cours</th>
+                    <th style={s.th}>PC1</th><th style={s.th}>Marge PC1</th>
                     <th style={s.th}>PC2</th><th style={s.th}>Marge PC2</th>
                     <th style={s.th}>PC3</th><th style={s.th}>Marge PC3</th>
-                    <th style={s.th}>MoS req.</th><th style={s.th}></th>
+                    <th style={s.th}>MoS</th><th style={s.th}></th>
                   </tr>
                 </thead>
                 <tbody>
                   {wlMerged.length===0&&(
-                    <tr><td colSpan={12} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>
+                    <tr><td colSpan={13} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>
                       Aucun titre — renseignez PC1 dans vos positions ou ajoutez des titres ici
                     </td></tr>
                   )}
-                  {wlMerged.map((p,idx)=>{
-                    const px=prices[p.ticker];
-                    const cours=px?.p??null,cur=px?.c??'';
-                    const pc2=p.pc1>0?p.pc1*(1-p.mos/200):0;
-                    const pc3=p.pc1>0?p.pc1*(1-p.mos/100):0;
-                    const mos1=cours&&p.pc1?((p.pc1-cours)/p.pc1)*100:null;
-                    const mos2=cours&&pc2?((pc2-cours)/pc2)*100:null;
-                    const mos3=cours&&pc3?((pc3-cours)/pc3)*100:null;
-                    const isPortfolio=p.wlType==='portfolio';
-                    const rowBg=mos1!=null&&mos1>=15?'#F0FDF4':mos1!=null&&mos1>=0?'#FFFBEB':mos1!=null?'#FEF2F2':'transparent';
+                  {wlMerged.map((l,idx)=>{
+                    const mg=lineMargins(l);
+                    const tgt=targetIdx(l);
+                    const tgtMos=[null,mg.mos1,mg.mos2,mg.mos3][tgt];
+                    const isPortfolio=l.wlType==='portfolio';
+                    const rowBg=tgtMos!=null&&tgtMos>=15?'#F0FDF4':tgtMos!=null&&tgtMos>=0?'#FFFBEB':tgtMos!=null?'#FEF2F2':'transparent';
+                    const cells=[[l.pc1,mg.mos1,'pc1_on',1],[mg.pc2,mg.mos2,'pc2_on',2],[mg.pc3,mg.mos3,'pc3_on',3]];
                     return(
-                      <tr key={p.ticker} style={{background:rowBg}}>
+                      <tr key={l.ticker} style={{background:rowBg}}>
                         <td style={{...s.td,color:'#9CA3AF',fontWeight:700}}>{idx+1}</td>
-                        <td style={s.td}><div style={{fontWeight:600}}>{p.ticker}</div><div style={{fontSize:11,color:'#9CA3AF'}}>{p.name}</div></td>
-                        <td style={s.td}>
-                          {isPortfolio
-                            ? <Badge text={p.env||'Portfolio'} color={ENV_CLR[p.env]||'#6B7280'}/>
-                            : <Badge text="Watch" color="#9CA3AF"/>}
-                        </td>
-                        <td style={s.td}>
-                          <span style={{fontWeight:600}}>{cours?fmt(cours):'—'}</span>
-                          {cur&&<span style={{fontSize:10,color:'#9CA3AF',marginLeft:3}}>{cur}</span>}
-                        </td>
-                        {[[p.pc1,mos1],[pc2,mos2],[pc3,mos3]].map(([pc,mos],i)=>(
-                          <Fragment key={i}>
-                            <td style={s.td}><span style={{fontWeight:600,color:pc>0?'#191919':'#D1D5DB'}}>{pc>0?fmt(pc):'—'}</span></td>
-                            <td style={s.td}>
-                              <span style={{fontWeight:700,color:mosClr(mos)}}>{mos==null?'—':(mos>=0?'+':'')+fmt(mos)+'%'}</span>
-                              {mos!=null&&<div style={{marginTop:3,height:3,background:'#EEEDE9',borderRadius:2,width:60}}>
-                                <div style={{width:Math.min(Math.abs(mos),100)+'%',height:'100%',background:mosClr(mos),borderRadius:2}}/>
-                              </div>}
-                            </td>
-                          </Fragment>
-                        ))}
-                        <td style={{...s.td,color:'#6B7280'}}>{p.mos}%</td>
+                        <td style={s.td}><div style={{fontWeight:600}}>{l.ticker}</div><div style={{fontSize:11,color:'#9CA3AF'}}>{l.name}</div></td>
+                        <td style={s.td}>{l.cat?<span style={{color:CAT_CLR[l.cat]||'#6B7280',fontSize:11,fontWeight:600}}>{l.cat}</span>:<span style={{color:'#D1D5DB'}}>—</span>}</td>
+                        <td style={s.td}>{isPortfolio?<Badge text={l.env||'Portfolio'} color={ENV_CLR[l.env]||'#6B7280'}/>:<Badge text="Watch" color="#9CA3AF"/>}</td>
+                        <td style={s.td}><span style={{fontWeight:600}}>{mg.cours?fmt(mg.cours):'—'}</span>{mg.cur&&<span style={{fontSize:10,color:'#9CA3AF',marginLeft:3}}>{mg.cur}</span>}</td>
+                        {cells.map(([pc,mos,key,n])=>{
+                          const on=l[key]!==false; const isTgt=tgt===n;
+                          return(
+                            <Fragment key={n}>
+                              <td style={{...s.td,opacity:on?1:0.4}}>
+                                <label style={{display:'flex',alignItems:'center',gap:5,cursor:'pointer'}}>
+                                  <input type="checkbox" checked={on} onChange={e=>setPcFlag(l,key,e.target.checked)}/>
+                                  <span style={{fontWeight:600,color:pc>0?(isTgt?'#CF6D56':'#191919'):'#D1D5DB'}}>{pc>0?fmt(pc):'—'}</span>
+                                </label>
+                              </td>
+                              <td style={{...s.td,opacity:on?1:0.35}}>
+                                <span style={{fontWeight:700,color:mosClr(mos)}}>{mos==null?'—':(mos>=0?'+':'')+fmt(mos)+'%'}</span>
+                                {mos!=null&&<div style={{marginTop:3,height:3,background:'#EEEDE9',borderRadius:2,width:60}}>
+                                  <div style={{width:Math.min(Math.abs(mos),100)+'%',height:'100%',background:mosClr(mos),borderRadius:2}}/>
+                                </div>}
+                              </td>
+                            </Fragment>
+                          );
+                        })}
+                        <td style={{...s.td,color:'#6B7280'}}>{l.mos}%</td>
                         <td style={s.td}>
                           {!isPortfolio&&(
                             <div style={{display:'flex',gap:4}}>
-                              <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 8px',fontSize:11}}
-                                onClick={()=>{setWlEditId(p.id);setWlAdding(false);}}>✏️</button>
-                              <button style={{...s.btn,background:'#FEE2E2',color:'#DC2626',padding:'3px 8px',fontSize:11}}
-                                onClick={()=>delWl(p.id)}>🗑️</button>
+                              <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 8px',fontSize:11}} onClick={()=>{setWlEditId(l.id);setWlAdding(false);}}>✏️</button>
+                              <button style={{...s.btn,background:'#FEE2E2',color:'#DC2626',padding:'3px 8px',fontSize:11}} onClick={()=>delWl(l.id)}>🗑️</button>
                             </div>
                           )}
                         </td>
@@ -556,15 +730,40 @@ function App(){
                 </tbody>
               </table>
             </div>
-            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>🟢 Marge &gt; 15% — 🟡 Marge 0-15% — 🔴 Cours au-dessus du PC1</div>
+            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>☑ Cible active · <span style={{color:'#CF6D56'}}>cible retenue pour le tri en orange</span> — 🟢 marge &gt; 15% · 🟡 0-15% · 🔴 au-dessus de la cible</div>
           </div>
         )}
-
+ 
         {/* ── ALLOCATION ── */}
         {tab==='allocation'&&(
           <div>
+            {/* Camemberts par titre : investi vs valorisation */}
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
-              {[{title:'Par enveloppe (€)',data:byEnv,clr:ENV_CLR},{title:'Par catégorie (€)',data:byCat,clr:CAT_CLR}].map(({title,data,clr})=>(
+              {[{title:'Pondération par titre — somme investie',data:byTitleInv},{title:'Pondération par titre — valorisation',data:byTitleVal}].map(({title,data})=>{
+                const tot=data.reduce((a,d)=>a+d.value,0);
+                return(
+                  <div key={title} style={s.card}>
+                    <div style={{fontWeight:700,marginBottom:16}}>{title}</div>
+                    <div style={{display:'flex',alignItems:'flex-start',gap:20,flexWrap:'wrap'}}>
+                      <PieChart data={data} colorMap={titleColors}/>
+                      <div style={{display:'flex',flexDirection:'column',gap:5,maxHeight:200,overflowY:'auto',minWidth:160}}>
+                        {data.map(d=>(
+                          <div key={d.name} style={{display:'flex',alignItems:'center',gap:8}}>
+                            <div style={{width:10,height:10,borderRadius:2,background:titleColors[d.name],flexShrink:0}}/>
+                            <span style={{color:'#6B7280',fontSize:12,flex:1}}>{d.name}</span>
+                            <span style={{fontWeight:700,fontSize:12}}>{tot>0?Math.round(d.value/tot*100):0}%</span>
+                          </div>
+                        ))}
+                        {data.length===0&&<span style={{fontSize:12,color:'#D1D5DB'}}>Aucune donnée</span>}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Camemberts par enveloppe et catégorie */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
+              {[{title:'Par enveloppe (valorisation €)',data:byEnv,clr:ENV_CLR},{title:'Par catégorie (valorisation €)',data:byCat,clr:CAT_CLR}].map(({title,data,clr})=>(
                 <div key={title} style={s.card}>
                   <div style={{fontWeight:700,marginBottom:16}}>{title}</div>
                   <div style={{display:'flex',alignItems:'center',gap:20,flexWrap:'wrap'}}>
@@ -574,7 +773,7 @@ function App(){
                         <div key={d.name} style={{display:'flex',alignItems:'center',gap:8}}>
                           <div style={{width:10,height:10,borderRadius:2,background:clr[d.name],flexShrink:0}}/>
                           <span style={{color:'#6B7280',fontSize:12}}>{d.name}</span>
-                          <span style={{fontWeight:700}}>{Math.round(d.value/data.reduce((s,x)=>s+x.value,0)*100)}%</span>
+                          <span style={{fontWeight:700}}>{Math.round(d.value/data.reduce((a,x)=>a+x.value,0)*100)}%</span>
                         </div>
                       ))}
                     </div>
@@ -582,14 +781,14 @@ function App(){
                 </div>
               ))}
             </div>
+            {/* Tableau détaillé */}
             <div style={s.card}>
-              <div style={{fontWeight:700,marginBottom:12}}>Pondérations par titre (toutes enveloppes, en €)</div>
+              <div style={{fontWeight:700,marginBottom:12}}>Pondérations par titre (toutes enveloppes)</div>
               <div style={{overflowX:'auto'}}>
                 <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
                   <thead><tr>
-                    <th style={s.th}>Ticker</th><th style={s.th}>Catégorie</th>
-                    <th style={s.th}>Enveloppes</th><th style={s.th}>Valeur €</th>
-                    <th style={{...s.th,minWidth:180}}>Poids</th>
+                    <th style={s.th}>Ticker</th><th style={s.th}>Catégorie</th><th style={s.th}>Enveloppes</th>
+                    <th style={s.th}>Investi €</th><th style={s.th}>Valeur €</th><th style={{...s.th,minWidth:160}}>Poids (val.)</th>
                   </tr></thead>
                   <tbody>
                     {posRankedEUR.map(p=>(
@@ -599,14 +798,15 @@ function App(){
                         <td style={s.td}><strong>{p.ticker}</strong> <span style={{fontSize:11,color:'#9CA3AF'}}>{p.name}</span></td>
                         <td style={s.td}><span style={{color:CAT_CLR[p.cat],fontSize:12,fontWeight:600}}>{p.cat}</span></td>
                         <td style={s.td}><div style={{display:'flex',gap:4,flexWrap:'wrap'}}>{p.envs.map(e=><Badge key={e} text={e} color={ENV_CLR[e]}/>)}</div></td>
-                        <td style={s.td}>{p.valEUR>0?fmtEUR(p.valEUR):'—'}</td>
+                        <td style={{...s.td,color:'#6B7280'}}>{p.invEUR>0?m(fmtEUR(p.invEUR)):'—'}</td>
+                        <td style={{...s.td,color:'#6B7280'}}>{p.valEUR>0?m(fmtEUR(p.valEUR)):'—'}</td>
                         <td style={s.td}>
-                          {totalEUR>0&&p.valEUR>0?(
+                          {totalValEUR>0&&p.valEUR>0?(
                             <div style={{display:'flex',alignItems:'center',gap:8}}>
                               <div style={{flex:1,height:6,background:'#F0EFE9',borderRadius:3}}>
-                                <div style={{width:Math.min((p.valEUR/totalEUR)*100,100)+'%',height:'100%',background:CAT_CLR[p.cat],borderRadius:3}}/>
+                                <div style={{width:Math.min((p.valEUR/totalValEUR)*100,100)+'%',height:'100%',background:CAT_CLR[p.cat],borderRadius:3}}/>
                               </div>
-                              <span style={{minWidth:38,textAlign:'right',fontSize:12,color:'#6B7280'}}>{fmt((p.valEUR/totalEUR)*100,1)}%</span>
+                              <span style={{minWidth:38,textAlign:'right',fontSize:12,color:'#6B7280'}}>{fmt((p.valEUR/totalValEUR)*100,1)}%</span>
                             </div>
                           ):<span style={{color:'#D1D5DB'}}>—</span>}
                         </td>
@@ -618,7 +818,69 @@ function App(){
             </div>
           </div>
         )}
-
+ 
+        {/* ── SORTIS ── */}
+        {tab==='sortis'&&(
+          <div>
+            <div style={{fontWeight:700,fontSize:16,marginBottom:4}}>Titres sortis du portefeuille</div>
+            <div style={{fontSize:12,color:'#9CA3AF',marginBottom:16}}>Quantité à zéro — conservés en mémoire (cibles, MoS, historique) au cas où ils réintègrent le portefeuille</div>
+            <div style={{overflowX:'auto',borderRadius:12,border:'1px solid #EEEDE9',background:'#FFFFFF'}}>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                <thead><tr style={{background:'#FAFAF8'}}>
+                  <th style={{...s.th,width:28}}></th>
+                  <th style={s.th}>Titre</th><th style={s.th}>Catégorie</th><th style={s.th}>Première entrée</th>
+                  <th style={s.th}>Sortie</th><th style={s.th}>Durée détenue</th><th style={s.th}>PC1</th><th style={s.th}>MoS</th>
+                </tr></thead>
+                <tbody>
+                  {exited.length===0&&<tr><td colSpan={8} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>Aucun titre sorti</td></tr>}
+                  {exited.map(p=>{
+                    const c=calc[p.id]; const isExp=expanded.has('x'+p.id);
+                    const heldMonths=c.firstBuy&&c.last?monthsElapsed(c.firstBuy)-(monthsElapsed(c.last)||0):null;
+                    return(
+                      <Fragment key={p.id}>
+                        <tr onClick={()=>toggle('x'+p.id)} style={{cursor:'pointer'}}
+                          onMouseEnter={e=>e.currentTarget.style.background='#FAFAF8'}
+                          onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                          <td style={{...s.td,color:'#9CA3AF',fontSize:12}}>{isExp?'▾':'▸'}</td>
+                          <td style={s.td}><div style={{fontWeight:600}}>{p.ticker}</div><div style={{fontSize:11,color:'#9CA3AF'}}>{p.name}</div></td>
+                          <td style={s.td}><span style={{color:CAT_CLR[p.cat],fontSize:12,fontWeight:600}}>{p.cat}</span></td>
+                          <td style={{...s.td,color:'#6B7280'}}>{fmtDate(c.firstBuy)}</td>
+                          <td style={{...s.td,color:'#DC2626',fontWeight:600}}>{fmtDate(c.last)}</td>
+                          <td style={{...s.td,color:'#6B7280'}}>{heldMonths==null?'—':heldMonths+' mois'}</td>
+                          <td style={{...s.td,color:'#6B7280'}}>{p.pc1?fmt(p.pc1):'—'}</td>
+                          <td style={{...s.td,color:'#6B7280'}}>{p.mos}%</td>
+                        </tr>
+                        {isExp&&(
+                          <tr><td colSpan={8} style={{padding:'12px 24px',background:'#FAFAF8',borderBottom:'1px solid #EEEDE9'}}>
+                            <table style={{borderCollapse:'collapse',fontSize:12,minWidth:340}}>
+                              <thead><tr>
+                                <th style={{...s.th,padding:'5px 12px'}}>Date</th><th style={{...s.th,padding:'5px 12px'}}>Type</th>
+                                <th style={{...s.th,padding:'5px 12px'}}>Qté</th><th style={{...s.th,padding:'5px 12px'}}>Prix</th>
+                              </tr></thead>
+                              <tbody>
+                                {[...c.mv].sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map((mvt,i)=>(
+                                  <tr key={i}>
+                                    <td style={{...s.td,padding:'5px 12px'}}>{fmtDate(mvt.date)}</td>
+                                    <td style={{...s.td,padding:'5px 12px',color:mvt.type==='vente'?'#DC2626':'#16A34A',fontWeight:600}}>{mvt.type==='vente'?'Vente':'Achat'}</td>
+                                    <td style={{...s.td,padding:'5px 12px'}}>{m(mvt.qte)}</td>
+                                    <td style={{...s.td,padding:'5px 12px'}}>{m(fmt(mvt.prix))} {c.cur}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',marginTop:10,fontSize:12,padding:'4px 12px'}}
+                              onClick={e=>{e.stopPropagation();setEditId(p.id);setTab('editeur');}}>✏️ Rouvrir / modifier</button>
+                          </td></tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+ 
         {/* ── ÉDITEUR ── */}
         {tab==='editeur'&&(
           <div>
@@ -629,7 +891,7 @@ function App(){
             {addNew&&(
               <div style={{...s.card,marginBottom:16}}>
                 <div style={{fontWeight:600,marginBottom:12,color:'#6B7280',fontSize:13}}>Nouvelle position</div>
-                <PosForm isNew init={{ticker:'',name:'',env:'CTO',cat:'Core Quality',qte:0,pru:0,pc1:0,mos:30}} onSave={addPos} onCancel={()=>setAddNew(false)} s={s}/>
+                <PosForm isNew init={{ticker:'',name:'',env:'CTO',cat:'Quality Core',pc1:0,mos:30,mouvements:[]}} onSave={addPos} onCancel={()=>setAddNew(false)} s={s}/>
               </div>
             )}
             <div style={s.card}>
@@ -637,18 +899,21 @@ function App(){
                 <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
                   <thead><tr>
                     <th style={s.th}>Ticker</th><th style={s.th}>Nom</th><th style={s.th}>Env.</th><th style={s.th}>Cat.</th>
-                    <th style={s.th}>Qté</th><th style={s.th}>PRU</th><th style={s.th}>PC1</th><th style={s.th}>MoS%</th><th style={s.th}>Actions</th>
+                    <th style={s.th}>Qté</th><th style={s.th}>1er achat</th><th style={s.th}>Dern. mvt</th>
+                    <th style={s.th}>PC1</th><th style={s.th}>MoS%</th><th style={s.th}>Actions</th>
                   </tr></thead>
                   <tbody>
-                    {pos.map(p=>(
+                    {pos.map(p=>{
+                      const c=calc[p.id];
+                      return(
                       <Fragment key={p.id}>
                         {editId===p.id?(
-                          <tr><td colSpan={9} style={{padding:16,background:'#FAFAF8'}}>
+                          <tr><td colSpan={10} style={{padding:16,background:'#FAFAF8'}}>
                             <PosForm init={p} onSave={updPos} onCancel={()=>setEditId(null)} s={s}/>
                           </td></tr>
                         ):delId===p.id?(
                           <tr style={{background:'#FEF2F2'}}>
-                            <td colSpan={9} style={{...s.td,padding:'12px 16px'}}>
+                            <td colSpan={10} style={{...s.td,padding:'12px 16px'}}>
                               <span style={{color:'#DC2626'}}>Supprimer <strong>{p.ticker}</strong> ({p.env}) ?</span>
                               <button style={{...s.btn,background:'#DC2626',color:'#fff',marginLeft:14,padding:'3px 12px',fontSize:12}} onClick={()=>delPos(p.id)}>Confirmer</button>
                               <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',marginLeft:6,padding:'3px 12px',fontSize:12}} onClick={()=>setDelId(null)}>Annuler</button>
@@ -660,8 +925,9 @@ function App(){
                             <td style={{...s.td,color:'#6B7280'}}>{p.name}</td>
                             <td style={s.td}><Badge text={p.env} color={ENV_CLR[p.env]}/></td>
                             <td style={s.td}><span style={{color:CAT_CLR[p.cat],fontSize:11,fontWeight:600}}>{p.cat}</span></td>
-                            <td style={{...s.td,color:'#6B7280'}}>{p.qte}</td>
-                            <td style={{...s.td,color:'#6B7280'}}>{p.pru?fmt(p.pru):'—'}</td>
+                            <td style={{...s.td,color:c.qte>0?'#6B7280':'#D1D5DB'}}>{c.qte||0}</td>
+                            <td style={{...s.td,color:'#6B7280'}}>{fmtDate(c.firstBuy)}</td>
+                            <td style={{...s.td,color:c.lastType==='vente'?'#DC2626':'#6B7280'}}>{fmtDate(c.last)}</td>
                             <td style={{...s.td,color:'#6B7280'}}>{p.pc1?fmt(p.pc1):'—'}</td>
                             <td style={{...s.td,color:'#6B7280'}}>{p.mos}%</td>
                             <td style={s.td}>
@@ -673,7 +939,7 @@ function App(){
                           </tr>
                         )}
                       </Fragment>
-                    ))}
+                    );})}
                   </tbody>
                 </table>
               </div>
@@ -684,7 +950,7 @@ function App(){
     </div>
   );
 }
-
+ 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
 </body>
