@@ -88,36 +88,6 @@ function Badge({text,color}){
   return <span style={{display:'inline-block',padding:'2px 7px',borderRadius:4,fontSize:11,fontWeight:600,background:color+'18',color}}>{text}</span>;
 }
 
-function MosBar({value,label}){
-  const clr=mosClr(value);
-  return(
-    <div style={{marginTop:5}}>
-      <div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:2}}>
-        <span style={{color:'#9CA3AF'}}>{label}</span>
-        <span style={{color:clr,fontWeight:700}}>{value==null?'—':(value>=0?'+':'')+fmt(value)+'%'}</span>
-      </div>
-      {value!=null&&<div style={{height:3,background:'#EEEDE9',borderRadius:2}}>
-        <div style={{width:Math.min(Math.abs(value),100)+'%',height:'100%',background:clr,borderRadius:2}}/>
-      </div>}
-    </div>
-  );
-}
-
-function PcCard({label,pc,mos,cur}){
-  const has=pc>0;
-  const bg=!has?'#FAFAF8':mos>=0?'#F0FDF4':'#FEF2F2';
-  const border=!has?'#EEEDE9':mos>=0?'#16A34A30':'#DC262630';
-  return(
-    <div style={{background:bg,border:'1px solid '+border,borderRadius:8,padding:'10px 12px',flex:1,minWidth:120}}>
-      <div style={{fontSize:9,color:'#9CA3AF',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:4}}>{label}</div>
-      <div style={{fontSize:15,fontWeight:700,color:has?(mos>=0?'#16A34A':'#191919'):'#D1D5DB'}}>
-        {has?fmt(pc):'—'}{has&&cur&&<span style={{fontSize:10,color:'#9CA3AF',marginLeft:3}}>{cur}</span>}
-      </div>
-      <MosBar value={mos} label="Marge act."/>
-    </div>
-  );
-}
-
 function PieChart({data,colorMap,size=170}){
   const total=data.reduce((s,d)=>s+d.value,0);
   if(!total) return <div style={{color:'#9CA3AF',textAlign:'center',padding:20,fontSize:12}}>Renseignez les mouvements</div>;
@@ -346,6 +316,32 @@ function CashForm({init,onSave,onCancel,isNew=false,s,tickers=[]}){
   );
 }
 
+function TitleStats({c,mask}){
+  const M=mask||(v=>v);
+  const sign=n=>n==null?'#9CA3AF':n>=0?'#16A34A':'#DC2626';
+  const sv=n=>n==null?'—':M((n>=0?'+':'−')+fmtEUR(Math.abs(n)));
+  const cells=[
+    {l:'Achats',v:c.buyEUR?M(fmtEUR(c.buyEUR)):'—'},
+    {l:'Ventes',v:c.sellEUR?M(fmtEUR(c.sellEUR)):'—'},
+    {l:'Investi net',v:c.investedEUR?M(fmtEUR(c.investedEUR)):'—'},
+    {l:'Valorisation',v:c.valEUR?M(fmtEUR(c.valEUR)):'—'},
+    {l:'Dividendes',v:c.divEUR?M(fmtEUR(c.divEUR)):'—'},
+    {l:'Réalisé',v:sv(c.realized),clr:sign(c.realized)},
+    {l:'Latent',v:sv(c.latent),clr:sign(c.latent)},
+    {l:'Résultat total',v:sv(c.result),clr:sign(c.result)},
+  ];
+  return(
+    <div style={{display:'flex',gap:20,flexWrap:'wrap',padding:'10px 14px',background:'#FFFFFF',border:'1px solid #EEEDE9',borderRadius:8,marginBottom:14}}>
+      {cells.map(({l,v,clr})=>(
+        <div key={l}>
+          <div style={{fontSize:10,color:'#9CA3AF',textTransform:'uppercase',letterSpacing:'0.05em'}}>{l}</div>
+          <div style={{fontWeight:700,fontSize:16,marginTop:2,color:clr||'#191919'}}>{v}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function App(){
   const [pos,       setPos]       = useState([]);
   const [wl,        setWl]        = useState([]);
@@ -371,6 +367,7 @@ function App(){
   const [cashEditId,setCashEditId]= useState(null);
   const [cashDelId, setCashDelId] = useState(null);
   const [cashEnvFilter,setCashEnvFilter]=useState('ALL');
+  const [cashYear,setCashYear]=useState('ALL');
 
   const m = v => hideAmt ? '•••' : v;                    // helper de masquage
 
@@ -396,7 +393,10 @@ function App(){
     const valNat=cours&&qte>0?cours*qte:0;
     const valEUR=toEUR(valNat,cur);              // valorisation : cours live converti en €
     const divEUR=cashFlows.filter(x=>x.type==='dividende'&&x.ticker===p.ticker&&x.env===p.env).reduce((a,x)=>a+num(x.montant),0);
-    const result=valEUR!=null?(valEUR+divEUR-investedEUR):null; // val + dividendes − investi
+    const pmpEUR=buyQ>0?buyEUR/buyQ:0;           // coût moyen € par action (interne, pour réalisé/latent)
+    const realized=sellEUR-sellQ*pmpEUR+divEUR;  // réalisé = ventes − coût des titres vendus + dividendes
+    const latent=valEUR!=null?(valEUR-qte*pmpEUR):null; // latent = valo − coût des titres détenus
+    const result=latent!=null?(realized+latent):null;   // total = réalisé + latent (= valo+div−investi)
     const buyDates=mv.filter(x=>x.type!=='vente').map(x=>x.date).filter(Boolean).sort();
     const firstBuy=buyDates[0]||null;
     let last=null,lastType=null;
@@ -409,7 +409,7 @@ function App(){
     const mos1=cours&&p.pc1?((p.pc1-cours)/p.pc1)*100:null;
     const mos2=cours&&pc2?((pc2-cours)/pc2)*100:null;
     const mos3=cours&&pc3?((pc3-cours)/pc3)*100:null;
-    return {mv,cours,cur,qte,investedEUR,valEUR,divEUR,result,firstBuy,last,lastType,holdM,sinceM,pc2,pc3,mos1,mos2,mos3};
+    return {mv,cours,cur,qte,buyEUR,sellEUR,investedEUR,valEUR,divEUR,realized,latent,result,firstBuy,last,lastType,holdM,sinceM,pc2,pc3,mos1,mos2,mos3};
   }
 
   useEffect(()=>{init();},[]);
@@ -547,6 +547,8 @@ function App(){
     return evs;
   })();
   const KIND_LBL={apport:'Apport',retrait:'Retrait',dividende:'Dividende',achat:'Achat',vente:'Vente'};
+  const cashYears=[...new Set(cashLedger.map(e=>(e.date||'').slice(0,4)).filter(Boolean))].sort().reverse();
+  const cashRows=(cashYear==='ALL'?cashLedger:cashLedger.filter(e=>(e.date||'').slice(0,4)===cashYear)).slice().reverse();
 
   const catWeight = cat => {
     const v=held.filter(p=>p.cat===cat).reduce((a,p)=>a+(calc[p.id].valEUR||0),0);
@@ -636,7 +638,7 @@ function App(){
         {[{id:'portfolio',l:'📋 Portefeuille'},{id:'watchlist',l:'👁 Watchlist'},{id:'allocation',l:'🥧 Allocation'},{id:'cash',l:'💶 Liquidités'},{id:'sortis',l:'📤 Sortis'},{id:'editeur',l:'✏️ Éditeur'}].map(({id,l})=>(
           <button key={id} onClick={()=>setTab(id)}
             style={{...s.btn,background:tab===id?'#191919':'transparent',color:tab===id?'#FFFFFF':'#6B7280',padding:'7px 16px'}}>
-            {l}{id==='sortis'&&exited.length>0?` (${exited.length})`:''}
+            {l}
           </button>
         ))}
       </div>
@@ -689,7 +691,7 @@ function App(){
                               onMouseEnter={e=>e.currentTarget.style.background='#FAFAF8'}
                               onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                               <td style={{...s.td,color:'#9CA3AF',fontSize:12}}>{isExp?'▾':'▸'}</td>
-                              <td style={s.td}><div style={{fontWeight:600}}>{p.ticker}</div><div style={{fontSize:11,color:'#9CA3AF'}}>{p.name}</div></td>
+                              <td style={s.td}><div style={{fontWeight:600}}>{p.name}</div><div style={{fontSize:11,color:'#9CA3AF'}}>{p.ticker}</div></td>
                               <td style={s.td}><Badge text={p.env} color={ENV_CLR[p.env]}/></td>
                               <td style={{...s.td,color:'#6B7280'}}>{m(c.qte||'—')}</td>
                               <td style={{...s.td,color:'#6B7280'}}>{c.investedEUR?m(fmtEUR(c.investedEUR)):'—'}</td>
@@ -704,30 +706,11 @@ function App(){
                             </tr>
                             {isExp&&(
                               <tr><td colSpan={8} style={{padding:'14px 24px',background:'#FAFAF8',borderBottom:'1px solid #EEEDE9'}}>
-                                <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'stretch',marginBottom:14}}>
-                                  <PcCard label="PC1 — Prix juste" pc={p.pc1} mos={c.mos1} cur={c.cur}/>
-                                  <PcCard label={`PC2 — ½ MoS (${(p.mos/2).toFixed(0)}%)`} pc={c.pc2} mos={c.mos2} cur={c.cur}/>
-                                  <PcCard label={`PC3 — MoS pleine (${p.mos}%)`} pc={c.pc3} mos={c.mos3} cur={c.cur}/>
-                                  <div style={{marginLeft:8,alignSelf:'center'}}>
-                                    <div style={{fontSize:11,color:'#9CA3AF'}}>MoS requise</div>
-                                    <div style={{fontWeight:800,fontSize:22,marginTop:2}}>{p.mos}%</div>
-                                    <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',marginTop:10,fontSize:12,padding:'4px 12px'}}
-                                      onClick={e=>{e.stopPropagation();setEditId(p.id);setTab('editeur');}}>✏️ Modifier</button>
-                                  </div>
-                                </div>
                                 {/* Synthèse chiffrée du titre */}
-                                <div style={{display:'flex',gap:20,flexWrap:'wrap',padding:'10px 14px',background:'#FFFFFF',border:'1px solid #EEEDE9',borderRadius:8,marginBottom:14}}>
-                                  {[
-                                    {l:'Investi',v:c.investedEUR?m(fmtEUR(c.investedEUR)):'—'},
-                                    {l:'Valorisation',v:c.valEUR?m(fmtEUR(c.valEUR)):'—'},
-                                    {l:'Dividendes versés',v:c.divEUR?m(fmtEUR(c.divEUR)):'—'},
-                                    {l:'Résultat (val.+div.−investi)',v:c.result==null?'—':m((c.result>=0?'+':'')+fmtEUR(c.result)),clr:c.result==null?'#9CA3AF':c.result>=0?'#16A34A':'#DC2626'},
-                                  ].map(({l,v,clr})=>(
-                                    <div key={l}>
-                                      <div style={{fontSize:10,color:'#9CA3AF',textTransform:'uppercase',letterSpacing:'0.05em'}}>{l}</div>
-                                      <div style={{fontWeight:700,fontSize:16,marginTop:2,color:clr||'#191919'}}>{v}</div>
-                                    </div>
-                                  ))}
+                                <TitleStats c={c} mask={m}/>
+                                <div style={{marginBottom:14}}>
+                                  <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',fontSize:12,padding:'4px 12px'}}
+                                    onClick={e=>{e.stopPropagation();setEditId(p.id);setTab('editeur');}}>✏️ Modifier dans l'Éditeur</button>
                                 </div>
                                 {/* Détail des mouvements */}
                                 <div style={{fontSize:11,color:'#9CA3AF',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>Historique des mouvements</div>
@@ -818,7 +801,7 @@ function App(){
                     return(
                       <tr key={l.ticker} style={{background:rowBg}}>
                         <td style={{...s.td,color:'#9CA3AF',fontWeight:700}}>{idx+1}</td>
-                        <td style={s.td}><div style={{fontWeight:600}}>{l.ticker}</div><div style={{fontSize:11,color:'#9CA3AF'}}>{l.name}</div></td>
+                        <td style={s.td}><div style={{fontWeight:600}}>{l.name}</div><div style={{fontSize:11,color:'#9CA3AF'}}>{l.ticker}</div></td>
                         <td style={s.td}>{l.cat?<span style={{color:CAT_CLR[l.cat]||'#6B7280',fontSize:11,fontWeight:600}}>{l.cat}</span>:<span style={{color:'#D1D5DB'}}>—</span>}</td>
                         <td style={s.td}>{isPortfolio?<Badge text={l.env||'Portfolio'} color={ENV_CLR[l.env]||'#6B7280'}/>:<Badge text="Watch" color="#9CA3AF"/>}</td>
                         <td style={s.td}><span style={{fontWeight:600}}>{mg.cours?fmt(mg.cours):'—'}</span>{mg.cur&&<span style={{fontSize:10,color:'#9CA3AF',marginLeft:3}}>{mg.cur}</span>}</td>
@@ -930,7 +913,7 @@ function App(){
                       <tr key={p.ticker}
                         onMouseEnter={e=>e.currentTarget.style.background='#FAFAF8'}
                         onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                        <td style={s.td}><strong>{p.ticker}</strong> <span style={{fontSize:11,color:'#9CA3AF'}}>{p.name}</span></td>
+                        <td style={s.td}><strong>{p.name}</strong> <span style={{fontSize:11,color:'#9CA3AF'}}>{p.ticker}</span></td>
                         <td style={s.td}><span style={{color:CAT_CLR[p.cat],fontSize:12,fontWeight:600}}>{p.cat}</span></td>
                         <td style={s.td}><div style={{display:'flex',gap:4,flexWrap:'wrap'}}>{p.envs.map(e=><Badge key={e} text={e} color={ENV_CLR[e]}/>)}</div></td>
                         <td style={{...s.td,color:'#6B7280'}}>{p.invEUR>0?m(fmtEUR(p.invEUR)):'—'}</td>
@@ -990,7 +973,7 @@ function App(){
             </div>
 
             {/* Filtre par enveloppe */}
-            <div style={{display:'flex',gap:3,marginBottom:12}}>
+            <div style={{display:'flex',gap:3,marginBottom:8}}>
               {['ALL',...ENVS].map(e=>(
                 <button key={e} onClick={()=>setCashEnvFilter(e)}
                   style={{...s.btn,background:cashEnvFilter===e?(e==='ALL'?'#191919':ENV_CLR[e]):'#F0EFE9',color:cashEnvFilter===e?'#fff':'#6B7280',padding:'4px 14px',fontSize:12}}>
@@ -998,6 +981,17 @@ function App(){
                 </button>
               ))}
             </div>
+            {/* Filtre par année */}
+            {cashYears.length>0&&(
+              <div style={{display:'flex',gap:3,marginBottom:12,flexWrap:'wrap'}}>
+                {['ALL',...cashYears].map(y=>(
+                  <button key={y} onClick={()=>setCashYear(y)}
+                    style={{...s.btn,background:cashYear===y?'#6B7280':'#F0EFE9',color:cashYear===y?'#fff':'#6B7280',padding:'3px 12px',fontSize:12}}>
+                    {y==='ALL'?'Toutes années':y}
+                  </button>
+                ))}
+              </div>
+            )}
 
             {cashAdding&&(
               <div style={{...s.card,marginBottom:16}}>
@@ -1007,18 +1001,18 @@ function App(){
             )}
 
             <div style={s.card}>
-              <div style={{overflowX:'auto'}}>
+              <div style={{overflowX:'auto',maxHeight:440,overflowY:'auto'}}>
                 <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
                   <thead><tr>
-                    <th style={s.th}>Date</th>
-                    {cashEnvFilter==='ALL'&&<th style={s.th}>Env.</th>}
-                    <th style={s.th}>Opération</th><th style={s.th}>Montant €</th>
-                    {cashEnvFilter!=='ALL'&&<th style={s.th}>Solde €</th>}
-                    <th style={s.th}>Actions</th>
+                    <th style={{...s.th,position:'sticky',top:0,background:'#FFFFFF',zIndex:1}}>Date</th>
+                    {cashEnvFilter==='ALL'&&<th style={{...s.th,position:'sticky',top:0,background:'#FFFFFF',zIndex:1}}>Env.</th>}
+                    <th style={{...s.th,position:'sticky',top:0,background:'#FFFFFF',zIndex:1}}>Opération</th><th style={{...s.th,position:'sticky',top:0,background:'#FFFFFF',zIndex:1}}>Montant €</th>
+                    {cashEnvFilter!=='ALL'&&<th style={{...s.th,position:'sticky',top:0,background:'#FFFFFF',zIndex:1}}>Solde €</th>}
+                    <th style={{...s.th,position:'sticky',top:0,background:'#FFFFFF',zIndex:1}}>Actions</th>
                   </tr></thead>
                   <tbody>
-                    {cashLedger.length===0&&<tr><td colSpan={6} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>Aucun mouvement de cash — commencez par un apport sur l'enveloppe concernée</td></tr>}
-                    {cashLedger.map((e,idx)=>{
+                    {cashRows.length===0&&<tr><td colSpan={6} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>Aucun mouvement de cash — commencez par un apport sur l'enveloppe concernée</td></tr>}
+                    {cashRows.map((e,idx)=>{
                       const isCash=e.source==='cash';
                       if(isCash&&cashEditId===e.id) return(
                         <tr key={'e'+idx}><td colSpan={6} style={{padding:16,background:'#FAFAF8'}}>
@@ -1063,7 +1057,7 @@ function App(){
                 </table>
               </div>
               {cashEnvFilter!=='ALL'&&cashLedger.length>0&&(
-                <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>Solde cumulé chronologique — la dernière ligne = solde actuel de l'enveloppe {cashEnvFilter} ({m(fmtEUR(cashByEnv[cashEnvFilter]))})</div>
+                <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>Du plus récent au plus ancien · colonne « Solde » = liquidités après chaque opération · la ligne du haut = solde actuel de {cashEnvFilter} ({m(fmtEUR(cashByEnv[cashEnvFilter]))})</div>
               )}
             </div>
           </div>
@@ -1092,7 +1086,7 @@ function App(){
                           onMouseEnter={e=>e.currentTarget.style.background='#FAFAF8'}
                           onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                           <td style={{...s.td,color:'#9CA3AF',fontSize:12}}>{isExp?'▾':'▸'}</td>
-                          <td style={s.td}><div style={{fontWeight:600}}>{p.ticker}</div><div style={{fontSize:11,color:'#9CA3AF'}}>{p.name}</div></td>
+                          <td style={s.td}><div style={{fontWeight:600}}>{p.name}</div><div style={{fontSize:11,color:'#9CA3AF'}}>{p.ticker}</div></td>
                           <td style={s.td}><span style={{color:CAT_CLR[p.cat],fontSize:12,fontWeight:600}}>{p.cat}</span></td>
                           <td style={{...s.td,color:'#6B7280'}}>{fmtDate(c.firstBuy)}</td>
                           <td style={{...s.td,color:'#DC2626',fontWeight:600}}>{fmtDate(c.last)}</td>
@@ -1102,6 +1096,7 @@ function App(){
                         </tr>
                         {isExp&&(
                           <tr><td colSpan={8} style={{padding:'12px 24px',background:'#FAFAF8',borderBottom:'1px solid #EEEDE9'}}>
+                            <TitleStats c={c} mask={m}/>
                             <table style={{borderCollapse:'collapse',fontSize:12,minWidth:340}}>
                               <thead><tr>
                                 <th style={{...s.th,padding:'5px 12px'}}>Date</th><th style={{...s.th,padding:'5px 12px'}}>Sens</th>
