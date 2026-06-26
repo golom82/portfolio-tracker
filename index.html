@@ -326,7 +326,7 @@ function CashForm({init,onSave,onCancel,isNew=false,s,tickers=[]}){
           <div><label style={s.lbl}>Titre</label>
             <select style={s.inp} value={f.ticker||''} onChange={e=>upd('ticker',e.target.value)}>
               <option value="">— choisir —</option>
-              {tickers.map(t=><option key={t.ticker} value={t.ticker}>{t.ticker}{t.name?' · '+t.name:''}</option>)}
+              {(f.ticker&&!tickers.some(t=>t.ticker===f.ticker)?[{ticker:f.ticker,name:'(sorti)'},...tickers]:tickers).map(t=><option key={t.ticker} value={t.ticker}>{t.ticker}{t.name?' · '+t.name:''}</option>)}
             </select>
           </div>
         )}
@@ -394,6 +394,7 @@ function App(){
   const [cashDelId, setCashDelId] = useState(null);
   const [cashEnvFilter,setCashEnvFilter]=useState('ALL');
   const [cashYear,setCashYear]=useState('ALL');
+  const [editorTab,setEditorTab]=useState('portfolio'); // sous-onglet éditeur : portfolio / watchlist / sortis
 
   const m = v => hideAmt ? '•••' : v;                    // helper de masquage
 
@@ -449,7 +450,43 @@ function App(){
     return {mv,cours,cur,qte,buyEUR,sellEUR,investedEUR,valEUR,divEUR,realizedGain,realized,latent,result,firstBuy,last,lastType,holdM,sinceM,pc2,pc3,mos1,mos2,mos3};
   }
 
-  useEffect(()=>{init();},[]);
+  // Fusionne plusieurs lignes d'un même ticker (ex. PEA + CTO) en une synthèse unique.
+  // PRU roulant GLOBAL : on coule tous les mouvements des poches dans un seul parcours chronologique.
+  // Chaque mouvement conserve son enveloppe (mvt.env) pour l'affichage détaillé.
+  function mergeCalc(group){
+    const ticker=group[0].ticker, name=group[0].name, cat=group[0].cat;
+    const px=prices[ticker], cours=px?.p??null, cur=px?.c??'';
+    const envs=[...new Set(group.map(p=>p.env))];
+    const allMv=[];
+    group.forEach(p=>(Array.isArray(p.mouvements)?p.mouvements:[]).forEach(mvt=>allMv.push({...mvt,env:p.env})));
+    const ordered=[...allMv].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+    let buyEUR=0,sellEUR=0,runQ=0,runCost=0,realizedGain=0;
+    ordered.forEach(x=>{
+      const q=num(x.qte), mt=num(x.montant);
+      if(x.type==='vente'){
+        sellEUR+=mt;
+        const pru=runQ>0?runCost/runQ:0;
+        const coutVendu=Math.min(pru*q, runCost);
+        realizedGain += mt - coutVendu;
+        runQ=Math.max(runQ-q,0); runCost=Math.max(runCost-coutVendu,0);
+      }else{ buyEUR+=mt; runQ+=q; runCost+=mt; }
+    });
+    const qte=runQ;
+    const investedEUR=buyEUR-sellEUR;
+    const valNat=cours&&qte>0?cours*qte:0;
+    const valEUR=toEUR(valNat,cur);
+    const divEUR=cashFlows.filter(x=>x.type==='dividende'&&x.ticker===ticker&&envs.includes(x.env)).reduce((a,x)=>a+num(x.montant),0);
+    const realized=realizedGain+divEUR;
+    const latent=valEUR!=null?(valEUR-runCost):null;
+    const result=latent!=null?(realized+latent):null;
+    const buyDates=allMv.filter(x=>x.type!=='vente').map(x=>x.date).filter(Boolean).sort();
+    const firstBuy=buyDates[0]||null;
+    let last=null,lastType=null;
+    allMv.forEach(x=>{ if(num(x.montant)===0) return;
+      if(x.date&&(last==null||x.date>=last)){last=x.date;lastType=x.type;} });
+    const holdM=monthsElapsed(firstBuy), sinceM=monthsElapsed(last);
+    return {ticker,name,cat,envs,group,mv:ordered,cours,cur,qte,buyEUR,sellEUR,investedEUR,valEUR,divEUR,realizedGain,realized,latent,result,firstBuy,last,lastType,holdM,sinceM};
+  }
 
   async function init(){
     const {data:posData,error:e1}=await db.from('positions').select('*').order('id');
@@ -564,6 +601,13 @@ function App(){
   const calc = {}; pos.forEach(p=>{calc[p.id]=calcPos(p);});
   const held    = pos.filter(p=>calc[p.id].qte>0);                 // en portefeuille
   const exited  = pos.filter(p=>calc[p.id].qte<=0 && calc[p.id].mv.length>0); // sortis
+  // Sous-listes de l'Éditeur (table positions) : détenus / watch (sans mouvement) / sortis
+  const editorCats={
+    portfolio: pos.filter(p=>calc[p.id].qte>0),
+    watchlist: pos.filter(p=>calc[p.id].qte<=0 && calc[p.id].mv.length===0),
+    sortis:    pos.filter(p=>calc[p.id].qte<=0 && calc[p.id].mv.length>0),
+  };
+  const editorList=[...(editorCats[editorTab]||[])].sort((a,b)=>(a.ticker||'').localeCompare(b.ticker||'')||(a.env||'').localeCompare(b.env||''));
 
   const filtered=held.filter(p=>(fEnv==='ALL'||p.env===fEnv)&&(fCat==='ALL'||p.cat===fCat));
   const grouped =CATS.map(cat=>({cat,items:filtered.filter(p=>p.cat===cat)})).filter(g=>g.items.length>0);
@@ -582,7 +626,7 @@ function App(){
   });
   const totalCash = ENVS.reduce((a,e)=>a+cashByEnv[e],0);
   const grandTotal = totalValEUR + totalCash;          // titres + cash
-  const cashTickers = [...new Map(pos.map(p=>[p.ticker,{ticker:p.ticker,name:p.name}])).values()];
+  const cashTickers = [...new Map(held.map(p=>[p.ticker,{ticker:p.ticker,name:p.name}])).values()]; // dividendes : titres détenus uniquement
   // Registre cash fusionné (flux + trades) pour l'enveloppe filtrée, trié chrono + solde cumulé
   const cashLedger=(()=>{
     const evs=[];
@@ -738,16 +782,16 @@ function App(){
                       <tr><td colSpan={8} style={{padding:'6px 12px',background:'#F7F6F3',fontSize:10,fontWeight:700,color:CAT_CLR[cat],textTransform:'uppercase',letterSpacing:'0.08em'}}>
                         ▪ {cat} <span style={{color:'#9CA3AF',marginLeft:6}}>· {items.length} titre{items.length>1?'s':''} · {fmt(catWeight(cat),1)}% du portefeuille</span>
                       </td></tr>
-                      {items.map(p=>{
-                        const c=calc[p.id]; const isExp=expanded.has(p.id);
+                      {Object.values(items.reduce((acc,p)=>{(acc[p.ticker]=acc[p.ticker]||[]).push(p);return acc;},{})).map(group=>{
+                        const c=mergeCalc(group); const key=c.ticker; const isExp=expanded.has(key);
                         return(
-                          <Fragment key={p.id}>
-                            <tr onClick={()=>toggle(p.id)} style={{cursor:'pointer'}}
+                          <Fragment key={key}>
+                            <tr onClick={()=>toggle(key)} style={{cursor:'pointer'}}
                               onMouseEnter={e=>e.currentTarget.style.background='#FAFAF8'}
                               onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                               <td style={{...s.td,color:'#9CA3AF',fontSize:12}}>{isExp?'▾':'▸'}</td>
-                              <td style={s.td}><div style={{fontWeight:600}}>{p.name}</div><div style={{fontSize:11,color:'#9CA3AF'}}>{p.ticker}</div></td>
-                              <td style={s.td}><Badge text={p.env} color={ENV_CLR[p.env]}/></td>
+                              <td style={s.td}><div style={{fontWeight:600}}>{c.name}</div><div style={{fontSize:11,color:'#9CA3AF'}}>{c.ticker}</div></td>
+                              <td style={s.td}><div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{c.envs.map(e=><Badge key={e} text={e} color={ENV_CLR[e]}/>)}</div></td>
                               <td style={{...s.td,color:'#6B7280'}}>{m(c.qte||'—')}</td>
                               <td style={{...s.td,color:'#6B7280'}}>{c.investedEUR?m(fmtEUR(c.investedEUR)):'—'}</td>
                               <td style={{...s.td,color:'#6B7280'}}>{c.valEUR?m(fmtEUR(c.valEUR)):'—'}</td>
@@ -761,24 +805,26 @@ function App(){
                             </tr>
                             {isExp&&(
                               <tr><td colSpan={8} style={{padding:'14px 24px',background:'#FAFAF8',borderBottom:'1px solid #EEEDE9'}}>
-                                {/* Synthèse chiffrée du titre */}
+                                {/* Synthèse chiffrée du titre (poches fusionnées, PRU global) */}
                                 <TitleStats c={c} mask={m}/>
                                 <div style={{marginBottom:14}}>
                                   <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',fontSize:12,padding:'4px 12px'}}
-                                    onClick={e=>{e.stopPropagation();setEditId(p.id);setTab('editeur');}}>✏️ Modifier dans l'Éditeur</button>
+                                    onClick={e=>{e.stopPropagation();if(c.group.length===1)setEditId(c.group[0].id);setEditorTab('portfolio');setTab('editeur');}}>✏️ Modifier dans l'Éditeur</button>
+                                  {c.group.length>1&&<span style={{fontSize:11,color:'#9CA3AF',marginLeft:8}}>· {c.group.length} poches — édition ligne par ligne dans l'Éditeur</span>}
                                 </div>
-                                {/* Détail des mouvements */}
+                                {/* Détail des mouvements, avec leur poche */}
                                 <div style={{fontSize:11,color:'#9CA3AF',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>Historique des mouvements</div>
                                 {c.mv.length===0?<div style={{fontSize:12,color:'#D1D5DB'}}>Aucun mouvement enregistré</div>:(
-                                  <table style={{borderCollapse:'collapse',fontSize:12,minWidth:340}}>
+                                  <table style={{borderCollapse:'collapse',fontSize:12,minWidth:400}}>
                                     <thead><tr>
-                                      <th style={{...s.th,padding:'5px 12px'}}>Date</th><th style={{...s.th,padding:'5px 12px'}}>Sens</th>
+                                      <th style={{...s.th,padding:'5px 12px'}}>Date</th><th style={{...s.th,padding:'5px 12px'}}>Env.</th><th style={{...s.th,padding:'5px 12px'}}>Sens</th>
                                       <th style={{...s.th,padding:'5px 12px'}}>Nb actions</th><th style={{...s.th,padding:'5px 12px'}}>Montant €</th>
                                     </tr></thead>
                                     <tbody>
-                                      {[...c.mv].sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map((mvt,i)=>(
+                                      {c.mv.map((mvt,i)=>(
                                         <tr key={i}>
                                           <td style={{...s.td,padding:'5px 12px'}}>{fmtDate(mvt.date)}</td>
+                                          <td style={{...s.td,padding:'5px 12px'}}><Badge text={mvt.env} color={ENV_CLR[mvt.env]||'#6B7280'}/></td>
                                           <td style={{...s.td,padding:'5px 12px',color:mvt.type==='vente'?'#DC2626':'#16A34A',fontWeight:600}}>{mvt.type==='vente'?'Vente':'Achat'}</td>
                                           <td style={{...s.td,padding:'5px 12px'}}>{m(fmtQte(num(mvt.qte)))}</td>
                                           <td style={{...s.td,padding:'5px 12px'}}>{m(fmtEUR(num(mvt.montant)))}</td>
@@ -1188,6 +1234,14 @@ function App(){
               <div style={{fontWeight:700,fontSize:16}}>Positions</div>
               {!addNew&&<button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>{setAddNew(true);setEditId(null);}}>+ Ajouter</button>}
             </div>
+            <div style={{display:'flex',gap:3,marginBottom:14,flexWrap:'wrap'}}>
+              {[{id:'portfolio',l:'En portefeuille'},{id:'watchlist',l:'Watchlist'},{id:'sortis',l:'Sortis'}].map(({id,l})=>(
+                <button key={id} onClick={()=>{setEditorTab(id);setEditId(null);}}
+                  style={{...s.btn,background:editorTab===id?'#191919':'#F0EFE9',color:editorTab===id?'#fff':'#6B7280',padding:'5px 14px',fontSize:12}}>
+                  {l} <span style={{opacity:0.6,marginLeft:4}}>{(editorCats[id]||[]).length}</span>
+                </button>
+              ))}
+            </div>
             {addNew&&(
               <div style={{...s.card,marginBottom:16}}>
                 <div style={{fontWeight:600,marginBottom:12,color:'#6B7280',fontSize:13}}>Nouvelle position</div>
@@ -1203,8 +1257,10 @@ function App(){
                     <th style={s.th}>PC1</th><th style={s.th}>MoS%</th><th style={s.th}>Actions</th>
                   </tr></thead>
                   <tbody>
-                    {pos.map(p=>{
+                    {editorList.length===0&&<tr><td colSpan={10} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>Aucun titre dans cette catégorie</td></tr>}
+                    {editorList.map((p,idx)=>{
                       const c=calc[p.id];
+                      const sameTk=idx>0&&editorList[idx-1].ticker===p.ticker; // 2e poche du même titre
                       return(
                       <Fragment key={p.id}>
                         {editId===p.id?(
@@ -1221,7 +1277,7 @@ function App(){
                           </tr>
                         ):(
                           <tr onMouseEnter={e=>e.currentTarget.style.background='#FAFAF8'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                            <td style={s.td}><strong>{p.ticker}</strong></td>
+                            <td style={{...s.td,borderLeft:sameTk?'2px solid #E0DED8':'2px solid transparent'}}>{sameTk?<span style={{color:'#9CA3AF'}}>↳ <span style={{fontSize:11}}>{p.ticker}</span></span>:<strong>{p.ticker}</strong>}</td>
                             <td style={{...s.td,color:'#6B7280'}}>{p.name}</td>
                             <td style={s.td}><Badge text={p.env} color={ENV_CLR[p.env]}/></td>
                             <td style={s.td}><span style={{color:CAT_CLR[p.cat],fontSize:11,fontWeight:600}}>{p.cat}</span></td>
