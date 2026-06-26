@@ -62,7 +62,10 @@ const { useState, useEffect, Fragment } = React;
 const CATS    = ['Défensif','Quality Core','Quality Satellite','Outsider'];
 const ENVS    = ['PEA','CTO','PER'];
 const CAT_CLR = {'Défensif':'#0D9488','Quality Core':'#2563EB','Quality Satellite':'#7C3AED','Outsider':'#D97706','Liquidités':'#64748B'};
-const ENV_CLR = {PEA:'#059669',CTO:'#2563EB',PER:'#EA580C'};
+const ENV_CLR = {PEA:'#059669',CTO:'#2563EB',PER:'#EA580C',Watchlist:'#9CA3AF'};
+// Enveloppe sentinelle : titre suivi mais pas encore acheté. VOLONTAIREMENT hors de ENVS
+// → exclu de held/exited, du cash, et de toutes les pondérations (enveloppe/catégorie/secteur/thème/IA).
+const WL_ENV = 'Watchlist';
 const CASH_CLR = '#64748B';
 
 // ── Axe SECTEUR (partition : une seule valeur par titre → camembert) ──
@@ -272,6 +275,7 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
         <div><label style={s.lbl}>Enveloppe</label>
           <select style={s.inp} value={f.env} onChange={e=>upd('env',e.target.value)}>
             {ENVS.map(e=><option key={e}>{e}</option>)}
+            <option value={WL_ENV}>👁 Watchlist (non acheté)</option>
           </select>
         </div>
         <div><label style={s.lbl}>Catégorie</label>
@@ -646,13 +650,13 @@ function App(){
 
   // ── Données dérivées ──
   const calc = {}; pos.forEach(p=>{calc[p.id]=calcPos(p);});
-  const held    = pos.filter(p=>calc[p.id].qte>0);                 // en portefeuille
-  const exited  = pos.filter(p=>calc[p.id].qte<=0 && calc[p.id].mv.length>0); // sortis
-  // Sous-listes de l'Éditeur (table positions) : détenus / watch (sans mouvement) / sortis
+  const held    = pos.filter(p=>p.env!==WL_ENV && calc[p.id].qte>0);                 // en portefeuille
+  const exited  = pos.filter(p=>p.env!==WL_ENV && calc[p.id].qte<=0 && calc[p.id].mv.length>0); // sortis
+  // Sous-listes de l'Éditeur (table positions) : détenus / watch (env Watchlist ou sans mouvement) / sortis
   const editorCats={
-    portfolio: pos.filter(p=>calc[p.id].qte>0),
-    watchlist: pos.filter(p=>calc[p.id].qte<=0 && calc[p.id].mv.length===0),
-    sortis:    pos.filter(p=>calc[p.id].qte<=0 && calc[p.id].mv.length>0),
+    portfolio: pos.filter(p=>p.env!==WL_ENV && calc[p.id].qte>0),
+    watchlist: pos.filter(p=>p.env===WL_ENV || calc[p.id].mv.length===0),
+    sortis:    pos.filter(p=>p.env!==WL_ENV && calc[p.id].qte<=0 && calc[p.id].mv.length>0),
   };
   const editorList=[...(editorCats[editorTab]||[])].sort((a,b)=>(a.ticker||'').localeCompare(b.ticker||'')||(a.env||'').localeCompare(b.env||''));
 
@@ -739,9 +743,15 @@ function App(){
   // ── Watchlist fusionnée, avec cible sélectionnable ──
   const targetIdx = l => (l.pc1_on!==false?1:l.pc2_on!==false?2:l.pc3_on!==false?3:1);
   const seenTk=new Set(); const wlMerged=[];
-  pos.filter(p=>p.pc1>0 && calc[p.id].qte>0).forEach(p=>{
+  // 1) titres DÉTENUS avec PC renseigné (suivi de cible sur ce qu'on possède)
+  pos.filter(p=>p.env!==WL_ENV && p.pc1>0 && calc[p.id].qte>0).forEach(p=>{
     if(!seenTk.has(p.ticker)){seenTk.add(p.ticker);wlMerged.push({...p,wlType:'portfolio'});}
   });
+  // 2) lignes WATCHLIST (positions enveloppe=Watchlist, pas encore achetées) — éditées dans l'Éditeur
+  pos.filter(p=>p.env===WL_ENV).forEach(p=>{
+    if(!seenTk.has(p.ticker)){seenTk.add(p.ticker);wlMerged.push({...p,wlType:'watchpos'});}
+  });
+  // 3) anciennes entrées de la table watchlist (legacy) — lecture seule, à recréer dans l'Éditeur
   wl.forEach(w=>{
     if(!seenTk.has(w.ticker)){seenTk.add(w.ticker);wlMerged.push({...w,wlType:'watch',env:null});}
   });
@@ -924,23 +934,10 @@ function App(){
                 <div style={{fontWeight:700,fontSize:16}}>Watchlist</div>
                 <div style={{fontSize:12,color:'#9CA3AF',marginTop:2}}>Triée par marge vers la cible active la plus haute — décochez PC1/PC2 pour viser un point d'entrée plus bas</div>
               </div>
-              <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>{setWlAdding(!wlAdding);setWlEditId(null);}}>
-                {wlAdding?'✕ Annuler':'+ Ajouter'}
+              <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>{setEditorTab('watchlist');setAddNew(true);setEditId(null);setTab('editeur');}}>
+                + Ajouter un titre à suivre
               </button>
             </div>
-
-            {wlAdding&&(
-              <div style={{...s.card,marginBottom:16}}>
-                <div style={{fontWeight:600,marginBottom:12,color:'#6B7280',fontSize:13}}>Nouveau titre</div>
-                <WlForm init={{ticker:'',name:'',pc1:0,mos:30,cat:'Quality Core'}} onSave={addWl} onCancel={()=>setWlAdding(false)} s={s}/>
-              </div>
-            )}
-            {wlEditId&&(
-              <div style={{...s.card,marginBottom:16,borderLeft:'3px solid #CF6D56'}}>
-                <div style={{fontWeight:600,marginBottom:12,color:'#6B7280',fontSize:13}}>Modifier le titre</div>
-                <WlForm init={wl.find(x=>x.id===wlEditId)||{}} onSave={updWl} onCancel={()=>setWlEditId(null)} s={s}/>
-              </div>
-            )}
 
             <div style={{overflowX:'auto',borderRadius:12,border:'1px solid #EEEDE9',background:'#FFFFFF'}}>
               <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
@@ -957,7 +954,7 @@ function App(){
                 <tbody>
                   {wlMerged.length===0&&(
                     <tr><td colSpan={14} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>
-                      Aucun titre — renseignez PC1 dans vos positions ou ajoutez des titres ici
+                      Aucun titre — ajoutez un titre à suivre via l'Éditeur (enveloppe « Watchlist ») ou renseignez PC1 sur une position détenue
                     </td></tr>
                   )}
                   {wlMerged.map((l,idx)=>{
@@ -972,7 +969,11 @@ function App(){
                         <td style={{...s.td,color:'#9CA3AF',fontWeight:700}}>{idx+1}</td>
                         <td style={s.td}><div style={{fontWeight:600}}>{l.name}</div><div style={{fontSize:11,color:'#9CA3AF'}}>{l.ticker}</div></td>
                         <td style={s.td}>{l.cat?<span style={{color:CAT_CLR[l.cat]||'#6B7280',fontSize:11,fontWeight:600}}>{l.cat}</span>:<span style={{color:'#D1D5DB'}}>—</span>}</td>
-                        <td style={s.td}>{isPortfolio?<Badge text={l.env||'Portfolio'} color={ENV_CLR[l.env]||'#6B7280'}/>:<Badge text="Watch" color="#9CA3AF"/>}</td>
+                        <td style={s.td}>{
+                          l.wlType==='portfolio'?<Badge text={l.env||'Portfolio'} color={ENV_CLR[l.env]||'#6B7280'}/>
+                          :l.wlType==='watchpos'?<Badge text="Watchlist" color="#9CA3AF"/>
+                          :<Badge text="Watch (ancien)" color="#D1D5DB"/>
+                        }</td>
                         <td style={s.td}><span style={{fontWeight:600}}>{mg.cours?fmt(mg.cours):'—'}</span>{mg.cur&&<span style={{fontSize:10,color:'#9CA3AF',marginLeft:3}}>{mg.cur}</span>}</td>
                         <td style={s.td}>
                           {mg.pct52==null?<span style={{color:'#D1D5DB'}}>—</span>:(
@@ -1007,9 +1008,13 @@ function App(){
                         })}
                         <td style={{...s.td,color:'#6B7280'}}>{l.mos}%</td>
                         <td style={s.td}>
-                          {!isPortfolio&&(
-                            <div style={{display:'flex',gap:4}}>
-                              <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 8px',fontSize:11}} onClick={()=>{setWlEditId(l.id);setWlAdding(false);}}>✏️</button>
+                          {l.wlType==='watchpos'&&(
+                            <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 10px',fontSize:11}} title="Modifier dans l'Éditeur"
+                              onClick={()=>{setEditId(l.id);setEditorTab('watchlist');setTab('editeur');}}>→ Éditeur</button>
+                          )}
+                          {l.wlType==='watch'&&(
+                            <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                              <span style={{fontSize:10,color:'#9CA3AF'}} title="Ancienne watchlist — recréez ce titre dans l'Éditeur (enveloppe Watchlist)">à recréer</span>
                               <button style={{...s.btn,background:'#FEE2E2',color:'#DC2626',padding:'3px 8px',fontSize:11}} onClick={()=>delWl(l.id)}>🗑️</button>
                             </div>
                           )}
@@ -1037,19 +1042,31 @@ function App(){
               </span>
             </div>
 
-            {/* Encart exposition IA (dérivé : Semi-conducteurs + Hyperscalers, dédupliqué) */}
-            <div style={{...s.card,marginBottom:16,background:'linear-gradient(135deg,#1E293B,#0F172A)',border:'none',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:14}}>
-              <div style={{maxWidth:520}}>
-                <div style={{fontSize:11,color:'#94A3B8',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:6}}>⚡ Exposition au thème IA</div>
-                <div style={{fontSize:13,color:'#CBD5E1',lineHeight:1.5}}>Semi-conducteurs (vendeurs de l'IA) + Hyperscalers (payeurs du capex). Mesure la <strong style={{color:'#E2E8F0'}}>taille</strong> du pari, pas un bloc homogène : si le marché doute du ROI de l'IA, les semis plongent pendant que les marges des hyperscalers respirent.</div>
-              </div>
-              <div style={{textAlign:'right'}}>
-                <div style={{fontSize:30,fontWeight:800,color:'#fff'}}>{fmt(iaPct,1)}%</div>
-                <div style={{fontSize:12,color:'#94A3B8',marginTop:2}}>{iaEUR>0?m(fmtEUR(iaEUR)):'—'} de la valo titres</div>
-              </div>
+            {/* Camemberts par titre : investi vs valorisation */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
+              {[{title:'Pondération par titre — somme investie',data:byTitleInv},{title:'Pondération par titre — valorisation'+(inclCash?' (cash inclus)':''),data:byTitleVal}].map(({title,data})=>{
+                const tot=data.reduce((a,d)=>a+d.value,0);
+                return(
+                  <div key={title} style={s.card}>
+                    <div style={{fontWeight:700,marginBottom:16}}>{title}</div>
+                    <div style={{display:'flex',alignItems:'flex-start',gap:20,flexWrap:'wrap'}}>
+                      <PieChart data={data} colorMap={titleColors}/>
+                      <div style={{display:'flex',flexDirection:'column',gap:5,maxHeight:200,overflowY:'auto',minWidth:160}}>
+                        {data.map(d=>(
+                          <div key={d.name} style={{display:'flex',alignItems:'center',gap:8}}>
+                            <div style={{width:10,height:10,borderRadius:2,background:titleColors[d.name],flexShrink:0}}/>
+                            <span style={{color:'#6B7280',fontSize:12,flex:1}}>{d.name}</span>
+                            <span style={{fontWeight:700,fontSize:12}}>{tot>0?Math.round(d.value/tot*100):0}%</span>
+                          </div>
+                        ))}
+                        {data.length===0&&<span style={{fontSize:12,color:'#D1D5DB'}}>Aucune donnée</span>}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-
-            {/* Secteur (camembert) + Thèmes (barres) */}
+            {/* Secteur (camembert) + Thèmes (barres) — au milieu */}
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
               <div style={s.card}>
                 <div style={{fontWeight:700,marginBottom:16}}>Par secteur (valorisation €){inclCash?' (cash inclus)':''}</div>
@@ -1092,30 +1109,6 @@ function App(){
                   </div>
                 )}
               </div>
-            </div>
-            {/* Camemberts par titre : investi vs valorisation */}
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
-              {[{title:'Pondération par titre — somme investie',data:byTitleInv},{title:'Pondération par titre — valorisation'+(inclCash?' (cash inclus)':''),data:byTitleVal}].map(({title,data})=>{
-                const tot=data.reduce((a,d)=>a+d.value,0);
-                return(
-                  <div key={title} style={s.card}>
-                    <div style={{fontWeight:700,marginBottom:16}}>{title}</div>
-                    <div style={{display:'flex',alignItems:'flex-start',gap:20,flexWrap:'wrap'}}>
-                      <PieChart data={data} colorMap={titleColors}/>
-                      <div style={{display:'flex',flexDirection:'column',gap:5,maxHeight:200,overflowY:'auto',minWidth:160}}>
-                        {data.map(d=>(
-                          <div key={d.name} style={{display:'flex',alignItems:'center',gap:8}}>
-                            <div style={{width:10,height:10,borderRadius:2,background:titleColors[d.name],flexShrink:0}}/>
-                            <span style={{color:'#6B7280',fontSize:12,flex:1}}>{d.name}</span>
-                            <span style={{fontWeight:700,fontSize:12}}>{tot>0?Math.round(d.value/tot*100):0}%</span>
-                          </div>
-                        ))}
-                        {data.length===0&&<span style={{fontSize:12,color:'#D1D5DB'}}>Aucune donnée</span>}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
             </div>
             {/* Camemberts par enveloppe et catégorie */}
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
@@ -1171,6 +1164,17 @@ function App(){
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+            {/* Encart exposition IA — en bas de page */}
+            <div style={{...s.card,marginTop:16,background:'linear-gradient(135deg,#1E293B,#0F172A)',border:'none',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:14}}>
+              <div style={{maxWidth:520}}>
+                <div style={{fontSize:11,color:'#94A3B8',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:6}}>⚡ Exposition au thème IA</div>
+                <div style={{fontSize:13,color:'#CBD5E1',lineHeight:1.5}}>Semi-conducteurs (vendeurs de l'IA) + Hyperscalers (payeurs du capex). Mesure la <strong style={{color:'#E2E8F0'}}>taille</strong> du pari, pas un bloc homogène : si le marché doute du ROI de l'IA, les semis plongent pendant que les marges des hyperscalers respirent.</div>
+              </div>
+              <div style={{textAlign:'right'}}>
+                <div style={{fontSize:30,fontWeight:800,color:'#fff'}}>{fmt(iaPct,1)}%</div>
+                <div style={{fontSize:12,color:'#94A3B8',marginTop:2}}>{iaEUR>0?m(fmtEUR(iaEUR)):'—'} de la valo titres</div>
               </div>
             </div>
           </div>
@@ -1382,8 +1386,8 @@ function App(){
             </div>
             {addNew&&(
               <div style={{...s.card,marginBottom:16}}>
-                <div style={{fontWeight:600,marginBottom:12,color:'#6B7280',fontSize:13}}>Nouvelle position</div>
-                <PosForm isNew init={{ticker:'',name:'',env:'CTO',cat:'Quality Core',pc1:0,mos:30,mouvements:[]}} onSave={addPos} onCancel={()=>setAddNew(false)} s={s}/>
+                <div style={{fontWeight:600,marginBottom:12,color:'#6B7280',fontSize:13}}>{editorTab==='watchlist'?'Nouveau titre à suivre (Watchlist)':'Nouvelle position'}</div>
+                <PosForm isNew init={{ticker:'',name:'',env:editorTab==='watchlist'?WL_ENV:'CTO',cat:'Quality Core',secteur:'',themes:[],pc1:0,mos:30,mouvements:[]}} onSave={addPos} onCancel={()=>setAddNew(false)} s={s}/>
               </div>
             )}
             <div style={s.card}>
