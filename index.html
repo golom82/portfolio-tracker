@@ -96,7 +96,10 @@ const fmtEUR = (n) => n==null?'—':fmt(n,0)+' €';
 const num    = v => { const f=parseFloat(String(v??'').replace(/\s/g,'').replace(',','.')); return isNaN(f)?0:f; };
 // Quantité : jusqu'à 4 décimales, sans zéros superflus (fractions d'action)
 const fmtQte = n => n==null?'—':Number(n).toLocaleString('fr-FR',{maximumFractionDigits:4});
-const mosClr = n => n==null?'#9CA3AF':n>=15?'#16A34A':n>=0?'#D97706':'#DC2626';
+// Quantité affichée en vue portefeuille : 1 décimale max (les calculs gardent la précision)
+const fmtQte1 = n => n==null?'—':Number(n).toLocaleString('fr-FR',{maximumFractionDigits:1});
+// Couleur marge : vert si cible atteinte/dépassée (≥0), jaune en zone d'approche (−5..0), rouge au-delà
+const mosClr = n => n==null?'#9CA3AF':n>=0?'#16A34A':n>=-5?'#D97706':'#DC2626';
 
 // Mois pleins (échus) écoulés depuis une date 'YYYY-MM-DD'
 function monthsElapsed(dateStr){
@@ -532,7 +535,7 @@ function App(){
       try{
         const r=await fetch(`/api/prices?symbols=${encodeURIComponent(syms)}`);
         const d=await r.json();
-        (d.quoteResponse?.result||[]).forEach(q=>{px[q.symbol]={p:q.regularMarketPrice,c:q.currency};});
+        (d.quoteResponse?.result||[]).forEach(q=>{px[q.symbol]={p:q.regularMarketPrice,c:q.currency,h52:q.fiftyTwoWeekHigh,l52:q.fiftyTwoWeekLow};});
       }catch{}
     }
     return px;
@@ -673,8 +676,8 @@ function App(){
     .concat(inclCash&&totalCash>0?[{name:'Liquidités',value:Math.round(totalCash)}]:[]).filter(x=>x.value>0);
   const byTitleInv=posRankedEUR.filter(p=>p.invEUR>0).map(p=>({name:p.ticker,value:Math.round(p.invEUR),cat:p.cat})).sort((a,b)=>b.value-a.value);
   const byTitleVal=posRankedEUR.filter(p=>p.valEUR>0).map(p=>({name:p.ticker,value:Math.round(p.valEUR),cat:p.cat})).sort((a,b)=>b.value-a.value)
-    .concat(inclCash?ENVS.filter(e=>cashByEnv[e]>0).map(e=>({name:'Cash '+e,value:Math.round(cashByEnv[e]),cat:'Liquidités'})):[]);
-  const titleColors={}; [...new Set([...byTitleInv,...byTitleVal].map(x=>x.name))].forEach((t,i)=>{titleColors[t]=t.startsWith('Cash ')?CASH_CLR:sliceColor(i);});
+    .concat(inclCash&&totalCash>0?[{name:'Liquidités',value:Math.round(totalCash),cat:'Liquidités'}]:[]);
+  const titleColors={}; [...new Set([...byTitleInv,...byTitleVal].map(x=>x.name))].forEach((t,i)=>{titleColors[t]=(t==='Liquidités'||t.startsWith('Cash '))?CASH_CLR:sliceColor(i);});
 
   // ── Watchlist fusionnée, avec cible sélectionnable ──
   const targetIdx = l => (l.pc1_on!==false?1:l.pc2_on!==false?2:l.pc3_on!==false?3:1);
@@ -686,12 +689,18 @@ function App(){
     if(!seenTk.has(w.ticker)){seenTk.add(w.ticker);wlMerged.push({...w,wlType:'watch',env:null});}
   });
   const lineMargins = l => {
-    const px=prices[l.ticker]?.p;
+    const pr=prices[l.ticker]||{};
+    const px=pr.p;
     const pc2=l.pc1>0?l.pc1*(1-l.mos/200):0, pc3=l.pc1>0?l.pc1*(1-l.mos/100):0;
     const mk=pc=>px&&pc?((pc-px)/pc)*100:null;
-    return {cours:px,cur:prices[l.ticker]?.c||'',pc2,pc3,mos1:mk(l.pc1),mos2:mk(pc2),mos3:mk(pc3)};
+    const h52=pr.h52, l52=pr.l52;
+    const pct52=(px!=null&&h52!=null&&l52!=null&&h52>l52)?Math.max(0,Math.min(100,((px-l52)/(h52-l52))*100)):null;
+    return {cours:px,cur:pr.c||'',pc2,pc3,mos1:mk(l.pc1),mos2:mk(pc2),mos3:mk(pc3),h52,l52,pct52};
   };
+  const allTargetsOff = l => !(l.pc1_on!==false||l.pc2_on!==false||l.pc3_on!==false);
   wlMerged.sort((a,b)=>{
+    const aOff=allTargetsOff(a), bOff=allTargetsOff(b);
+    if(aOff!==bOff) return aOff?1:-1;            // titre sans aucune cible active → en bas de liste
     const ma=lineMargins(a), mb=lineMargins(b);
     const va=[null,ma.mos1,ma.mos2,ma.mos3][targetIdx(a)];
     const vb=[null,mb.mos1,mb.mos2,mb.mos3][targetIdx(b)];
@@ -794,7 +803,7 @@ function App(){
                               <td style={{...s.td,color:'#9CA3AF',fontSize:12}}>{isExp?'▾':'▸'}</td>
                               <td style={s.td}><div style={{fontWeight:600}}>{c.name}</div><div style={{fontSize:11,color:'#9CA3AF'}}>{c.ticker}</div></td>
                               <td style={s.td}><div style={{display:'flex',gap:3,flexWrap:'wrap'}}>{c.envs.map(e=><Badge key={e} text={e} color={ENV_CLR[e]}/>)}</div></td>
-                              <td style={{...s.td,color:'#6B7280'}}>{m(c.qte||'—')}</td>
+                              <td style={{...s.td,color:'#6B7280'}}>{m(c.qte?fmtQte1(c.qte):'—')}</td>
                               <td style={{...s.td,color:'#6B7280'}}>{c.investedEUR?m(fmtEUR(c.investedEUR)):'—'}</td>
                               <td style={{...s.td,color:'#6B7280'}}>{c.valEUR?m(fmtEUR(c.valEUR)):'—'}</td>
                               <td style={{...s.td,color:'#6B7280'}}>{c.holdM==null?'—':c.holdM+' mois'}</td>
@@ -881,7 +890,7 @@ function App(){
                 <thead>
                   <tr style={{background:'#FAFAF8'}}>
                     <th style={{...s.th,width:36}}>#</th>
-                    <th style={s.th}>Titre</th><th style={s.th}>Catégorie</th><th style={s.th}>Type</th><th style={s.th}>Cours</th>
+                    <th style={s.th}>Titre</th><th style={s.th}>Catégorie</th><th style={s.th}>Type</th><th style={s.th}>Cours</th><th style={s.th}>52 sem.</th>
                     <th style={s.th}>PC1</th><th style={s.th}>Marge PC1</th>
                     <th style={s.th}>PC2</th><th style={s.th}>Marge PC2</th>
                     <th style={s.th}>PC3</th><th style={s.th}>Marge PC3</th>
@@ -890,7 +899,7 @@ function App(){
                 </thead>
                 <tbody>
                   {wlMerged.length===0&&(
-                    <tr><td colSpan={13} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>
+                    <tr><td colSpan={14} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>
                       Aucun titre — renseignez PC1 dans vos positions ou ajoutez des titres ici
                     </td></tr>
                   )}
@@ -899,7 +908,7 @@ function App(){
                     const tgt=targetIdx(l);
                     const tgtMos=[null,mg.mos1,mg.mos2,mg.mos3][tgt];
                     const isPortfolio=l.wlType==='portfolio';
-                    const rowBg=tgtMos!=null&&tgtMos>=15?'#F0FDF4':tgtMos!=null&&tgtMos>=0?'#FFFBEB':tgtMos!=null?'#FEF2F2':'transparent';
+                    const rowBg=tgtMos==null?'transparent':tgtMos>=0?'#F0FDF4':tgtMos>=-5?'#FFFBEB':'#FEF2F2';
                     const cells=[[l.pc1,mg.mos1,'pc1_on',1],[mg.pc2,mg.mos2,'pc2_on',2],[mg.pc3,mg.mos3,'pc3_on',3]];
                     return(
                       <tr key={l.ticker} style={{background:rowBg}}>
@@ -908,6 +917,18 @@ function App(){
                         <td style={s.td}>{l.cat?<span style={{color:CAT_CLR[l.cat]||'#6B7280',fontSize:11,fontWeight:600}}>{l.cat}</span>:<span style={{color:'#D1D5DB'}}>—</span>}</td>
                         <td style={s.td}>{isPortfolio?<Badge text={l.env||'Portfolio'} color={ENV_CLR[l.env]||'#6B7280'}/>:<Badge text="Watch" color="#9CA3AF"/>}</td>
                         <td style={s.td}><span style={{fontWeight:600}}>{mg.cours?fmt(mg.cours):'—'}</span>{mg.cur&&<span style={{fontSize:10,color:'#9CA3AF',marginLeft:3}}>{mg.cur}</span>}</td>
+                        <td style={s.td}>
+                          {mg.pct52==null?<span style={{color:'#D1D5DB'}}>—</span>:(
+                            <div style={{minWidth:96}} title={'Bas 52 sem. '+fmt(mg.l52)+' · Haut '+fmt(mg.h52)}>
+                              <div style={{position:'relative',height:6,background:'#EEEDE9',borderRadius:3}}>
+                                <div style={{position:'absolute',left:'calc('+mg.pct52+'% - 3px)',top:-2,width:6,height:10,borderRadius:2,background:'#191919'}}/>
+                              </div>
+                              <div style={{display:'flex',justifyContent:'space-between',fontSize:9,color:'#9CA3AF',marginTop:2}}>
+                                <span>{fmt(mg.l52,0)}</span><span>{fmt(mg.h52,0)}</span>
+                              </div>
+                            </div>
+                          )}
+                        </td>
                         {cells.map(([pc,mos,key,n])=>{
                           const on=l[key]!==false;
                           return(
@@ -942,7 +963,7 @@ function App(){
                 </tbody>
               </table>
             </div>
-            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>☑ Cible active (les colonnes décochées sont grisées) — le tri utilise la cible active la plus haute · 🟢 marge &gt; 15% · 🟡 0-15% · 🔴 au-dessus de la cible</div>
+            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>☑ Cible active (colonnes décochées grisées) · tri par marge vers la cible active la plus haute, titres sans cible active en bas · 52 sem. = position du cours entre bas et haut · 🟢 cible atteinte/dépassée · 🟡 à moins de 5 % (approche) · 🔴 au-delà</div>
           </div>
         )}
 
