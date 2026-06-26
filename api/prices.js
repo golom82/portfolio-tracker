@@ -23,6 +23,9 @@ export default async function handler(req, res) {
         regularMarketPrice: meta.regularMarketPrice,
         currency: meta.currency,
         regularMarketTime: meta.regularMarketTime,
+        // Range annuel — déjà présent dans le bloc meta du chart, sans crumb
+        fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh ?? null,
+        fiftyTwoWeekLow: meta.fiftyTwoWeekLow ?? null,
       };
     } catch { return null; }
   }));
