@@ -64,6 +64,28 @@ const ENVS    = ['PEA','CTO','PER'];
 const CAT_CLR = {'Défensif':'#0D9488','Quality Core':'#2563EB','Quality Satellite':'#7C3AED','Outsider':'#D97706','Liquidités':'#64748B'};
 const ENV_CLR = {PEA:'#059669',CTO:'#2563EB',PER:'#EA580C'};
 const CASH_CLR = '#64748B';
+
+// ── Axe SECTEUR (partition : une seule valeur par titre → camembert) ──
+const SECTEUR_NA = 'Non classé';
+const SECTEURS = [
+  'Semi-conducteurs','Logiciel et cloud','Publicité','Plateformes numériques',
+  'Paiements','Finance — données & indices','Assurance','Santé',
+  'Industrie & biens d’équipement','Défense','Services & franchises récurrents',
+  'Consommation & restauration','Luxe','Médias & contenu','Utilities / Énergie',
+];
+const SECTEUR_CLR = {
+  'Semi-conducteurs':'#2563EB','Plateformes numériques':'#0EA5E9','Utilities / Énergie':'#06B6D4',
+  'Finance — données & indices':'#0D9488','Paiements':'#059669','Services & franchises récurrents':'#16A34A',
+  'Assurance':'#65A30D','Consommation & restauration':'#CA8A04','Industrie & biens d’équipement':'#D97706',
+  'Santé':'#DC2626','Médias & contenu':'#E11D48','Publicité':'#DB2777','Luxe':'#9333EA',
+  'Logiciel et cloud':'#7C3AED','Défense':'#57534E',
+  [SECTEUR_NA]:'#9CA3AF','Liquidités':CASH_CLR,
+};
+
+// ── Axe THÈME (projecteurs : 0..n valeurs par titre → barres, total ≠ 100 %) ──
+const THEMES   = ['Hyperscalers','Divertissement','Serial acquirers'];
+const THEME_CLR = {'Hyperscalers':'#2563EB','Divertissement':'#DB2777','Serial acquirers':'#D97706'};
+
 const CASH_TYPES = ['apport','retrait','dividende']; // apport/dividende = +cash, retrait = −cash
 const FX_TICKERS = ['EURUSD=X','EURCAD=X','EURDKK=X'];
 
@@ -231,7 +253,7 @@ const WL_FIELDS=[
 ];
 
 function PosForm({init,onSave,onCancel,isNew=false,s}){
-  const [f,setF]=useState({mouvements:[],...init});
+  const [f,setF]=useState({mouvements:[],themes:[],...init});
   const upd=(k,v)=>setF(p=>({...p,[k]:v}));
   // dates dérivées
   const buyDates=(f.mouvements||[]).filter(m=>m.type!=='vente').map(m=>m.date).filter(Boolean).sort();
@@ -257,11 +279,31 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
             {CATS.map(c=><option key={c}>{c}</option>)}
           </select>
         </div>
+        <div><label style={s.lbl}>Secteur</label>
+          <select style={s.inp} value={f.secteur||''} onChange={e=>upd('secteur',e.target.value)}>
+            <option value="">— {SECTEUR_NA} —</option>
+            {SECTEURS.map(x=><option key={x}>{x}</option>)}
+          </select>
+        </div>
         {POS_NUM_FIELDS.map(({k,l,t})=>(
           <div key={k}><label style={s.lbl}>{l}</label>
             <input style={s.inp} type={t} value={f[k]??''} onChange={e=>upd(k,parseFloat(e.target.value)||0)}/>
           </div>
         ))}
+      </div>
+      <div style={{marginTop:10}}>
+        <div style={{fontSize:11,color:'#9CA3AF',marginBottom:6,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.05em'}}>Thèmes <span style={{textTransform:'none',fontWeight:400}}>— lentilles transversales, plusieurs possibles (facultatif)</span></div>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+          {THEMES.map(t=>{
+            const on=(f.themes||[]).includes(t);
+            return(
+              <label key={t} style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',padding:'5px 11px',borderRadius:6,border:'1px solid '+(on?THEME_CLR[t]:'#E0DED8'),background:on?THEME_CLR[t]+'14':'#FFF',fontSize:12}}>
+                <input type="checkbox" checked={on} onChange={e=>{const cur=f.themes||[];upd('themes',e.target.checked?[...cur,t]:cur.filter(x=>x!==t));}}/>
+                <span style={{fontWeight:600,color:on?THEME_CLR[t]:'#6B7280'}}>{t}</span>
+              </label>
+            );
+          })}
+        </div>
       </div>
       <MovementsEditor value={f.mouvements} onChange={v=>upd('mouvements',v)} s={s}/>
       <div style={{display:'flex',gap:16,marginTop:10,fontSize:11,color:'#9CA3AF'}}>
@@ -270,7 +312,7 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
       </div>
       <div style={{display:'flex',gap:8,marginTop:14}}>
         <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>{
-          const clean={...f,mouvements:(f.mouvements||[]).map(mvt=>({date:mvt.date,type:mvt.type==='vente'?'vente':'achat',qte:num(mvt.qte),montant:num(mvt.montant)}))};
+          const clean={...f,secteur:f.secteur||null,themes:Array.isArray(f.themes)?f.themes:[],mouvements:(f.mouvements||[]).map(mvt=>({date:mvt.date,type:mvt.type==='vente'?'vente':'achat',qte:num(mvt.qte),montant:num(mvt.montant)}))};
           onSave(clean);
         }}>{isNew?'+ Ajouter':'✓ Sauvegarder'}</button>
         <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280'}} onClick={onCancel}>Annuler</button>
@@ -663,7 +705,7 @@ function App(){
   const byTicker={};
   held.forEach(p=>{
     const c=calc[p.id];
-    if(!byTicker[p.ticker]) byTicker[p.ticker]={ticker:p.ticker,name:p.name,cat:p.cat,envs:[],valEUR:0,invEUR:0};
+    if(!byTicker[p.ticker]) byTicker[p.ticker]={ticker:p.ticker,name:p.name,cat:p.cat,secteur:p.secteur||SECTEUR_NA,envs:[],valEUR:0,invEUR:0};
     byTicker[p.ticker].valEUR+=(c.valEUR||0);
     byTicker[p.ticker].invEUR+=(c.investedEUR||0);
     if(!byTicker[p.ticker].envs.includes(p.env)) byTicker[p.ticker].envs.push(p.env);
@@ -678,6 +720,21 @@ function App(){
   const byTitleVal=posRankedEUR.filter(p=>p.valEUR>0).map(p=>({name:p.ticker,value:Math.round(p.valEUR),cat:p.cat})).sort((a,b)=>b.value-a.value)
     .concat(inclCash&&totalCash>0?[{name:'Liquidités',value:Math.round(totalCash),cat:'Liquidités'}]:[]);
   const titleColors={}; [...new Set([...byTitleInv,...byTitleVal].map(x=>x.name))].forEach((t,i)=>{titleColors[t]=(t==='Liquidités'||t.startsWith('Cash '))?CASH_CLR:sliceColor(i);});
+
+  // ── Allocation par SECTEUR (partition : 1 valeur/titre ; Liquidités en tranche si cash inclus) ──
+  const secMap={};
+  held.forEach(p=>{const sec=p.secteur||SECTEUR_NA;secMap[sec]=(secMap[sec]||0)+(calc[p.id].valEUR||0);});
+  const bySecteur=Object.entries(secMap).map(([name,value])=>({name,value:Math.round(value)})).filter(x=>x.value>0)
+    .concat(inclCash&&totalCash>0?[{name:'Liquidités',value:Math.round(totalCash)}]:[])
+    .sort((a,b)=>b.value-a.value);
+  // ── Exposition THÉMATIQUE (projecteurs : multi-valeurs → barres, % de la valo titres, total ≠ 100 %) ──
+  const themeMap={}; THEMES.forEach(t=>themeMap[t]=0);
+  held.forEach(p=>(Array.isArray(p.themes)?p.themes:[]).forEach(t=>{if(themeMap[t]!=null)themeMap[t]+=(calc[p.id].valEUR||0);}));
+  const byTheme=THEMES.map(t=>({name:t,value:Math.round(themeMap[t])})).filter(x=>x.value>0);
+  // ── Exposition IA (dérivée, non saisie) = secteur Semi-conducteurs ∪ thème Hyperscalers, dédupliqué ──
+  const iaEUR=held.filter(p=>p.secteur==='Semi-conducteurs'||(Array.isArray(p.themes)&&p.themes.includes('Hyperscalers')))
+    .reduce((a,p)=>a+(calc[p.id].valEUR||0),0);
+  const iaPct=totalValEUR>0?(iaEUR/totalValEUR)*100:0;
 
   // ── Watchlist fusionnée, avec cible sélectionnable ──
   const targetIdx = l => (l.pc1_on!==false?1:l.pc2_on!==false?2:l.pc3_on!==false?3:1);
@@ -979,6 +1036,63 @@ function App(){
                 Affecte uniquement les graphiques de <strong>valorisation</strong> (enveloppe, catégorie, titre). La somme investie reste hors cash.
               </span>
             </div>
+
+            {/* Encart exposition IA (dérivé : Semi-conducteurs + Hyperscalers, dédupliqué) */}
+            <div style={{...s.card,marginBottom:16,background:'linear-gradient(135deg,#1E293B,#0F172A)',border:'none',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:14}}>
+              <div style={{maxWidth:520}}>
+                <div style={{fontSize:11,color:'#94A3B8',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:6}}>⚡ Exposition au thème IA</div>
+                <div style={{fontSize:13,color:'#CBD5E1',lineHeight:1.5}}>Semi-conducteurs (vendeurs de l'IA) + Hyperscalers (payeurs du capex). Mesure la <strong style={{color:'#E2E8F0'}}>taille</strong> du pari, pas un bloc homogène : si le marché doute du ROI de l'IA, les semis plongent pendant que les marges des hyperscalers respirent.</div>
+              </div>
+              <div style={{textAlign:'right'}}>
+                <div style={{fontSize:30,fontWeight:800,color:'#fff'}}>{fmt(iaPct,1)}%</div>
+                <div style={{fontSize:12,color:'#94A3B8',marginTop:2}}>{iaEUR>0?m(fmtEUR(iaEUR)):'—'} de la valo titres</div>
+              </div>
+            </div>
+
+            {/* Secteur (camembert) + Thèmes (barres) */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
+              <div style={s.card}>
+                <div style={{fontWeight:700,marginBottom:16}}>Par secteur (valorisation €){inclCash?' (cash inclus)':''}</div>
+                <div style={{display:'flex',alignItems:'flex-start',gap:20,flexWrap:'wrap'}}>
+                  <PieChart data={bySecteur} colorMap={SECTEUR_CLR}/>
+                  <div style={{display:'flex',flexDirection:'column',gap:5,maxHeight:220,overflowY:'auto',minWidth:200}}>
+                    {bySecteur.length===0&&<span style={{fontSize:12,color:'#D1D5DB'}}>Renseignez le secteur des titres dans l'Éditeur</span>}
+                    {bySecteur.map(d=>{
+                      const tot=bySecteur.reduce((a,x)=>a+x.value,0);
+                      return(
+                        <div key={d.name} style={{display:'flex',alignItems:'center',gap:8}}>
+                          <div style={{width:10,height:10,borderRadius:2,background:SECTEUR_CLR[d.name]||'#9CA3AF',flexShrink:0}}/>
+                          <span style={{color:'#6B7280',fontSize:12,flex:1}}>{d.name}</span>
+                          <span style={{fontWeight:700,fontSize:12}}>{tot>0?Math.round(d.value/tot*100):0}%</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+              <div style={s.card}>
+                <div style={{fontWeight:700,marginBottom:4}}>Exposition thématique</div>
+                <div style={{fontSize:11,color:'#9CA3AF',marginBottom:18}}>Lentilles transversales — un titre peut porter plusieurs thèmes, le total ne fait pas 100 %. En % de la valorisation titres.</div>
+                {byTheme.length===0?<div style={{fontSize:12,color:'#D1D5DB'}}>Aucun thème renseigné — cochez les thèmes d'un titre dans l'Éditeur</div>:(
+                  <div style={{display:'flex',flexDirection:'column',gap:16}}>
+                    {byTheme.map(t=>{
+                      const pct=totalValEUR>0?(t.value/totalValEUR)*100:0;
+                      return(
+                        <div key={t.name}>
+                          <div style={{display:'flex',justifyContent:'space-between',marginBottom:5}}>
+                            <span style={{fontSize:13,fontWeight:600,color:THEME_CLR[t.name]||'#191919'}}>{t.name}</span>
+                            <span style={{fontSize:13,fontWeight:700}}>{fmt(pct,1)}% · {m(fmtEUR(t.value))}</span>
+                          </div>
+                          <div style={{height:10,background:'#F0EFE9',borderRadius:5}}>
+                            <div style={{width:Math.min(pct,100)+'%',height:'100%',background:THEME_CLR[t.name]||'#2563EB',borderRadius:5}}/>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
             {/* Camemberts par titre : investi vs valorisation */}
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
               {[{title:'Pondération par titre — somme investie',data:byTitleInv},{title:'Pondération par titre — valorisation'+(inclCash?' (cash inclus)':''),data:byTitleVal}].map(({title,data})=>{
@@ -1029,7 +1143,7 @@ function App(){
               <div style={{overflowX:'auto'}}>
                 <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
                   <thead><tr>
-                    <th style={s.th}>Ticker</th><th style={s.th}>Catégorie</th><th style={s.th}>Enveloppes</th>
+                    <th style={s.th}>Ticker</th><th style={s.th}>Catégorie</th><th style={s.th}>Secteur</th><th style={s.th}>Enveloppes</th>
                     <th style={s.th}>Investi €</th><th style={s.th}>Valeur €</th><th style={{...s.th,minWidth:160}}>Poids (val.)</th>
                   </tr></thead>
                   <tbody>
@@ -1039,6 +1153,7 @@ function App(){
                         onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                         <td style={s.td}><strong>{p.name}</strong> <span style={{fontSize:11,color:'#9CA3AF'}}>{p.ticker}</span></td>
                         <td style={s.td}><span style={{color:CAT_CLR[p.cat],fontSize:12,fontWeight:600}}>{p.cat}</span></td>
+                        <td style={s.td}><span style={{color:SECTEUR_CLR[p.secteur]||'#9CA3AF',fontSize:12,fontWeight:600}}>{p.secteur}</span></td>
                         <td style={s.td}><div style={{display:'flex',gap:4,flexWrap:'wrap'}}>{p.envs.map(e=><Badge key={e} text={e} color={ENV_CLR[e]}/>)}</div></td>
                         <td style={{...s.td,color:'#6B7280'}}>{p.invEUR>0?m(fmtEUR(p.invEUR)):'—'}</td>
                         <td style={{...s.td,color:'#6B7280'}}>{p.valEUR>0?m(fmtEUR(p.valEUR)):'—'}</td>
