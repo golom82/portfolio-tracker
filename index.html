@@ -488,6 +488,8 @@ function App(){
     return {ticker,name,cat,envs,group,mv:ordered,cours,cur,qte,buyEUR,sellEUR,investedEUR,valEUR,divEUR,realizedGain,realized,latent,result,firstBuy,last,lastType,holdM,sinceM};
   }
 
+  useEffect(()=>{init();},[]);
+
   async function init(){
     const {data:posData,error:e1}=await db.from('positions').select('*').order('id');
     if(e1){setError('Supabase: '+e1.message);setLoading(false);return;}
