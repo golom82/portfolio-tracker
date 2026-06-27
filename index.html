@@ -89,6 +89,45 @@ const SECTEUR_CLR = {
 const THEMES   = ['Hyperscalers','Divertissement','Serial acquirers'];
 const THEME_CLR = {'Hyperscalers':'#2563EB','Divertissement':'#DB2777','Serial acquirers':'#D97706'};
 
+// ── Module RISQUE / CORRÉLATIONS ──────────────────────────────────────────
+// Historique Yahoo (proxy /api/history) → rendements log hebdomadaires → corrélation de Pearson.
+// Deux lectures : « métier » (en devise locale, parenté économique pure) et « portefeuille » (en €,
+// avec le facteur de change commun à toutes les lignes non-€). Calcul À LA DEMANDE (jamais à l'init).
+const HIST_RANGE='3y', HIST_INTERVAL='1wk';
+const CORR_MIN_WEEKS=52;    // < 1 an de recouvrement commun → paire affichée « n/a »
+const NEFF_MIN_WEEKS=104;   // historique mini (~2 ans) pour entrer dans le calcul du N_eff (fenêtre commune saine, matrice PSD)
+const SNAP_STALE_DAYS=90;   // au-delà, le dernier instantané est signalé comme « à rafraîchir »
+// Échelle de couleur DISCRÈTE (paliers), calée sur la plage utile d'un portefeuille actions long-only
+// (les corrélations négatives sont rares et précieuses → bleu ; la diagonale est neutre, gérée à part).
+function corrColor(r){
+  if(r==null) return '#F0EFE9';   // n/a
+  if(r<0)    return '#2563EB';    // bleu — décorrélation (rare)
+  if(r<0.30) return '#16A34A';    // vert — paris bien distincts
+  if(r<0.50) return '#CA8A04';    // or — parenté modérée
+  if(r<0.70) return '#D97706';    // orange — grappe en formation
+  return '#DC2626';               // rouge — quasi-redondance (alerte concentration)
+}
+const CORR_BANDS=[
+  {l:'< 0 (décorrélé)',c:'#2563EB'},{l:'0 – 0,3 (distinct)',c:'#16A34A'},
+  {l:'0,3 – 0,5 (modéré)',c:'#CA8A04'},{l:'0,5 – 0,7 (grappe)',c:'#D97706'},
+  {l:'≥ 0,7 (redondant)',c:'#DC2626'},{l:'n/a (< 1 an commun)',c:'#F0EFE9'},
+];
+// Raccourci d'affichage : retire le suffixe de place boursière (.AS, .TO, .MI…)
+const shortTk = t => String(t||'').replace(/\.(AS|TO|MI|DE|PA|L|SW|HE|BR|MC|F|CO|ST|VI|OL|HK)$/i,'');
+// Rendements log d'une série de prix ALIGNÉE (gaps/0 ignorés)
+function logReturns(p){const r=[];for(let i=1;i<p.length;i++){if(p[i-1]>0&&p[i]>0)r.push(Math.log(p[i]/p[i-1]));}return r;}
+// Corrélation de Pearson de deux vecteurs de rendements
+function pearson(a,b){
+  const n=Math.min(a.length,b.length); if(n<2) return null;
+  let sa=0,sb=0; for(let i=0;i<n;i++){sa+=a[i];sb+=b[i];}
+  const ma=sa/n, mb=sb/n; let cov=0,va=0,vb=0;
+  for(let i=0;i<n;i++){const da=a[i]-ma,db=b[i]-mb;cov+=da*db;va+=da*da;vb+=db*db;}
+  if(va<=0||vb<=0) return null;
+  return cov/Math.sqrt(va*vb);
+}
+const round2=n=>n==null?null:Math.round(n*100)/100;
+const round0=n=>n==null?null:Math.round(n);
+
 const CASH_TYPES = ['apport','retrait','dividende']; // apport/dividende = +cash, retrait = −cash
 const FX_TICKERS = ['EURUSD=X','EURCAD=X','EURDKK=X'];
 
@@ -166,6 +205,48 @@ function PieChart({data,colorMap,size=170}){
 
 // Palette pour distinguer des titres de même catégorie dans les camemberts par titre
 const sliceColor = i => `hsl(${(i*53)%360} 58% 56%)`;
+
+// Heatmap de corrélation : grille n×n, cellules colorées par paliers, valeur affichée en ×100.
+// Diagonale neutre (= 1 par construction, sans info). Tickers ordonnés par secteur en amont → les
+// blocs intra-secteur ressortent visuellement sur la diagonale.
+function Heatmap({tickers,matrix}){
+  const n=tickers.length;
+  const cell=n>16?24:28;
+  return(
+    <div style={{overflowX:'auto',paddingBottom:6}}>
+      <table style={{borderCollapse:'collapse',fontSize:9}}>
+        <thead>
+          <tr>
+            <th style={{position:'sticky',left:0,background:'#FFF',zIndex:2}}></th>
+            {tickers.map((t,j)=>(
+              <th key={j} title={t} style={{height:56,verticalAlign:'bottom',padding:'0 0 4px'}}>
+                <div style={{writingMode:'vertical-rl',transform:'rotate(180deg)',fontSize:9,color:'#6B7280',fontWeight:600,margin:'0 auto',whiteSpace:'nowrap'}}>{shortTk(t)}</div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {tickers.map((t,i)=>(
+            <tr key={i}>
+              <td title={t} style={{position:'sticky',left:0,background:'#FFF',zIndex:1,paddingRight:8,textAlign:'right',fontSize:9,color:'#6B7280',fontWeight:600,whiteSpace:'nowrap'}}>{shortTk(t)}</td>
+              {tickers.map((u,j)=>{
+                const v=matrix[i][j], diag=i===j;
+                const bg=diag?'#E0DED8':corrColor(v);
+                const txt=diag||v==null?'':Math.round(v*100);
+                return(
+                  <td key={j} title={diag?t:`${shortTk(t)} × ${shortTk(u)} : ${v==null?'n/a':fmt(v,2)}`}
+                    style={{width:cell,height:cell,minWidth:cell,background:bg,textAlign:'center',color:'#fff',fontWeight:700,border:'1px solid #fff'}}>
+                    {txt}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 // ── Recherche de ticker Yahoo Finance (via /api/search serverless) ──
 function TickerSearch({onPick}){
@@ -444,6 +525,15 @@ function App(){
   const [cashEnvFilter,setCashEnvFilter]=useState('ALL');
   const [cashYear,setCashYear]=useState('ALL');
   const [editorTab,setEditorTab]=useState('portfolio'); // sous-onglet éditeur : portfolio / watchlist / sortis
+  // ── État module Risque ──
+  const [riskBusy,  setRiskBusy]  = useState(false);
+  const [riskErr,   setRiskErr]   = useState(null);
+  const [riskData,  setRiskData]  = useState(null);     // résultat du dernier calcul (en mémoire de session)
+  const [riskMode,  setRiskMode]  = useState('eur');    // heatmap affichée : 'eur' (portefeuille) | 'local' (métier)
+  const [snapshots, setSnapshots] = useState([]);       // historique persistant (table risk_snapshots)
+  const [riskNote,  setRiskNote]  = useState('');       // note libre du prochain instantané
+  const [snapDelId, setSnapDelId] = useState(null);
+  const [snapOpen,  setSnapOpen]  = useState(new Set());
 
   const m = v => hideAmt ? '•••' : v;                    // helper de masquage
 
@@ -553,6 +643,8 @@ function App(){
     setWl(watchlist);
     const {data:cashData}=await db.from('cash_flows').select('*').order('id');
     setCashFlows(cashData||[]);
+    const {data:snapData}=await db.from('risk_snapshots').select('*').order('date',{ascending:false});
+    setSnapshots(snapData||[]);
     await doFetch(positions,watchlist);
     setLoading(false);
   }
@@ -619,6 +711,164 @@ function App(){
     setCashFlows(cashFlows.map(x=>x.id===f.id?{...x,...patch}:x));setCashEditId(null);
   }
   async function delCash(id){await db.from('cash_flows').delete().eq('id',id);setCashFlows(cashFlows.filter(x=>x.id!==id));setCashDelId(null);}
+
+  // ── Module Risque : récupération de l'historique (un appel /api/history par symbole) ──
+  async function fetchHistory(tickers){
+    const out={}, CHUNK=6;
+    for(let i=0;i<tickers.length;i+=CHUNK){
+      const part=tickers.slice(i,i+CHUNK);
+      await Promise.all(part.map(async sym=>{
+        try{
+          const r=await fetch(`/api/history?symbol=${encodeURIComponent(sym)}&range=${HIST_RANGE}&interval=${HIST_INTERVAL}`);
+          const d=await r.json();
+          const res=d.chart?.result?.[0];
+          if(!res){out[sym]={dates:[],closes:[],currency:''};return;}
+          const ts=res.timestamp||[];
+          const adj=res.indicators?.adjclose?.[0]?.adjclose;       // adjusted close = splits + dividendes neutralisés
+          const cl=res.indicators?.quote?.[0]?.close;
+          const arr=adj||cl||[];
+          out[sym]={dates:ts.map(t=>new Date(t*1000).toISOString().slice(0,10)),closes:arr,currency:res.meta?.currency||''};
+        }catch{out[sym]={dates:[],closes:[],currency:''};}
+      }));
+    }
+    return out;
+  }
+
+  // ── Calcul des corrélations + N_eff (à la demande) ──
+  async function computeRisk(){
+    const uniq=[...new Set(held.map(p=>p.ticker))];
+    if(uniq.length<2){setRiskErr('Au moins 2 positions détenues sont nécessaires pour une matrice.');return;}
+    setRiskBusy(true);setRiskErr(null);
+    try{
+      // Poids = valorisation € agrégée par ticker (toutes poches confondues) — « où est mon capital »
+      const wMap={}; held.forEach(p=>{wMap[p.ticker]=(wMap[p.ticker]||0)+(calc[p.id].valEUR||0);});
+      const secOf={}; held.forEach(p=>{if(secOf[p.ticker]==null)secOf[p.ticker]=p.secteur||SECTEUR_NA;});
+      const nameOf={}; held.forEach(p=>{if(nameOf[p.ticker]==null)nameOf[p.ticker]=p.name||p.ticker;});
+
+      const hist=await fetchHistory([...uniq,...FX_TICKERS]);
+      // Séries FX indexées par date, avec lookup « as-of » (dernière valeur connue ≤ date)
+      const fxArr={}; FX_TICKERS.forEach(f=>{const h=hist[f];fxArr[f]=h?h.dates.map((d,i)=>({d,r:h.closes[i]})).filter(x=>x.r>0):[];});
+      const fxAt=(f,date)=>{const a=fxArr[f];if(!a||!a.length)return null;let lo=0,hi=a.length-1,res=null;while(lo<=hi){const mid=(lo+hi)>>1;if(a[mid].d<=date){res=a[mid].r;lo=mid+1;}else hi=mid-1;}return res;};
+      const fxKey=cur=>cur==='USD'?'EURUSD=X':cur==='CAD'?'EURCAD=X':cur==='DKK'?'EURDKK=X':null;
+
+      // Pour chaque ticker : série {dates, local[], eur[]} alignées (même index = même date)
+      const series={};
+      uniq.forEach(t=>{
+        const h=hist[t]; if(!h||!h.dates.length){series[t]=null;return;}
+        const cur=h.currency||prices[t]?.c||''; const fk=fxKey(cur);
+        const dates=[],local=[],eur=[];
+        h.dates.forEach((d,i)=>{
+          const p=h.closes[i]; if(!(p>0))return;
+          let e=p;
+          if(fk){const fr=fxAt(fk,d);if(!(fr>0))return;e=p/fr;}   // USD/CAD/DKK → € (cohérent avec toEUR)
+          dates.push(d);local.push(p);eur.push(e);
+        });
+        series[t]=dates.length?{dates,local,eur,cur}:null;
+      });
+
+      // Tickers exploitables, ordonnés par secteur (les grappes intra-secteur s'alignent sur la diagonale)
+      const valid=uniq.filter(t=>series[t]).sort((a,b)=>{
+        const ia=SECTEURS.indexOf(secOf[a]),ib=SECTEURS.indexOf(secOf[b]);
+        return (ia<0?99:ia)-(ib<0?99:ib)||a.localeCompare(b);
+      });
+
+      // Matrice pairwise sur fenêtre commune par paire (une ligne jeune ne tronque pas toute la matrice)
+      const mkMatrix=field=>{
+        const M=valid.map(()=>valid.map(()=>null));
+        for(let i=0;i<valid.length;i++){
+          M[i][i]=1;
+          for(let j=i+1;j<valid.length;j++){
+            const A=series[valid[i]],B=series[valid[j]];
+            const bi={}; B.dates.forEach((d,k)=>bi[d]=k);
+            const pa=[],pb=[];
+            A.dates.forEach((d,k)=>{if(bi[d]!=null){pa.push(A[field][k]);pb.push(B[field][bi[d]]);}});
+            if(pa.length-1<CORR_MIN_WEEKS){M[i][j]=M[j][i]=null;continue;}
+            const c=pearson(logReturns(pa),logReturns(pb));
+            M[i][j]=M[j][i]=c;
+          }
+        }
+        return M;
+      };
+      const matLocal=mkMatrix('local'), matEur=mkMatrix('eur');
+
+      // N_eff = 1 / (wᵀ R w) — pondéré par les poids € (réagit aux renforcements), R sur fenêtre commune (PSD)
+      const core=valid.filter(t=>series[t].dates.length-1>=NEFF_MIN_WEEKS);
+      let neffLocal=null,neffEur=null,avgLocal=null,avgEur=null,coreUsed=[];
+      if(core.length>=2){
+        let common=null;
+        core.forEach(t=>{const ds=new Set(series[t].dates);common=common==null?ds:new Set([...common].filter(d=>ds.has(d)));});
+        const cd=[...common].sort();
+        if(cd.length-1>=CORR_MIN_WEEKS){
+          coreUsed=core;
+          const retL={},retE={};
+          core.forEach(t=>{const di={};series[t].dates.forEach((d,k)=>di[d]=k);
+            retL[t]=logReturns(cd.map(d=>series[t].local[di[d]]));
+            retE[t]=logReturns(cd.map(d=>series[t].eur[di[d]]));});
+          const buildR=ret=>{const m=core.length,R=core.map(()=>core.map(()=>0));
+            for(let i=0;i<m;i++){R[i][i]=1;for(let j=i+1;j<m;j++){const c=pearson(ret[core[i]],ret[core[j]])||0;R[i][j]=R[j][i]=c;}}return R;};
+          const RL=buildR(retL),RE=buildR(retE);
+          const wRaw=core.map(t=>wMap[t]||0), wsum=wRaw.reduce((a,b)=>a+b,0)||1, w=wRaw.map(x=>x/wsum);
+          const quad=R=>{let s=0;for(let i=0;i<w.length;i++)for(let j=0;j<w.length;j++)s+=w[i]*w[j]*R[i][j];return s;};
+          neffLocal=1/quad(RL); neffEur=1/quad(RE);
+          const avgOff=R=>{let nu=0,de=0;for(let i=0;i<w.length;i++)for(let j=0;j<w.length;j++)if(i!==j){nu+=w[i]*w[j]*R[i][j];de+=w[i]*w[j];}return de>0?nu/de:null;};
+          avgLocal=avgOff(RL); avgEur=avgOff(RE);
+        }
+      }
+
+      // Paire la plus liée (en €, sur le pairwise)
+      let topPair=null;
+      for(let i=0;i<valid.length;i++)for(let j=i+1;j<valid.length;j++){const c=matEur[i][j];if(c!=null&&(topPair==null||c>topPair.r))topPair={a:valid[i],b:valid[j],r:c};}
+
+      setRiskData({
+        asOf:new Date().toISOString().slice(0,10),
+        tickers:valid, nameOf, secOf, weights:wMap,
+        matLocal, matEur, neffLocal, neffEur, avgLocal, avgEur, topPair,
+        core:coreUsed, excluded:valid.filter(t=>!core.includes(t)),
+      });
+    }catch(e){setRiskErr('Calcul du risque : '+e.message);}
+    setRiskBusy(false);
+  }
+
+  // Lecture auto-générée (factuelle) : diff avec l'instantané précédent
+  function buildAutoSummary(cur,prev){
+    const p=[];
+    if(!prev){
+      p.push(`Premier instantané — N_eff métier ${fmt(cur.neffLocal,1)}, N_eff € ${fmt(cur.neffEur,1)} (écart de change ${fmt((cur.neffLocal??0)-(cur.neffEur??0),1)}).`);
+    }else{
+      const arr=x=>x>0.05?'↑':x<-0.05?'↓':'→';
+      const dE=(cur.neffEur??0)-Number(prev.n_eff_eur||0), dM=(cur.neffLocal??0)-Number(prev.n_eff_metier||0);
+      const dC=(cur.avgEur??0)-Number(prev.corr_moyenne||0);
+      p.push(`Depuis le ${fmtDate(prev.date)} : N_eff € ${fmt(prev.n_eff_eur,1)} → ${fmt(cur.neffEur,1)} ${arr(dE)}, N_eff métier ${fmt(prev.n_eff_metier,1)} → ${fmt(cur.neffLocal,1)} ${arr(dM)}.`);
+      p.push(`Corrélation moyenne ${dC>0.01?'en hausse':dC<-0.01?'en baisse':'stable'} (${fmt(prev.corr_moyenne,2)} → ${fmt(cur.avgEur,2)}).`);
+    }
+    if(cur.topPair) p.push(`Paire la plus liée : ${shortTk(cur.topPair.a)}×${shortTk(cur.topPair.b)} à ${fmt(cur.topPair.r,2)}.`);
+    if(cur.excluded&&cur.excluded.length) p.push(`${cur.excluded.length} ligne(s) trop récente(s) exclue(s) du N_eff.`);
+    return p.join(' ');
+  }
+
+  // Snapshots CRUD (insert / delete uniquement — jamais d'UPDATE)
+  async function saveSnapshot(){
+    if(!riskData) return;
+    const rec={
+      date:riskData.asOf,
+      n_eff_metier:round2(riskData.neffLocal), n_eff_eur:round2(riskData.neffEur),
+      corr_moyenne:round2(riskData.avgEur),
+      n_lines_incl:riskData.core.length, n_lines_excl:riskData.excluded.length,
+      top_pair:riskData.topPair?{a:riskData.topPair.a,b:riskData.topPair.b,r:round2(riskData.topPair.r)}:null,
+      composition:Object.fromEntries(riskData.tickers.map(t=>[t,round0(riskData.weights[t])])),
+      params:{range:HIST_RANGE,interval:HIST_INTERVAL,min_weeks_corr:CORR_MIN_WEEKS,min_weeks_neff:NEFF_MIN_WEEKS},
+      auto_summary:buildAutoSummary(riskData,snapshots[0]),
+      note:riskNote.trim()||null,
+    };
+    const {data,error}=await db.from('risk_snapshots').insert([rec]).select();
+    if(error){setRiskErr('Enregistrement instantané : '+error.message);return;}
+    if(data){setSnapshots([...data,...snapshots]);setRiskNote('');}
+  }
+  async function delSnapshot(id){
+    const {error}=await db.from('risk_snapshots').delete().eq('id',id);
+    if(error){setRiskErr('Suppression instantané : '+error.message);return;}
+    setSnapshots(snapshots.filter(x=>x.id!==id));setSnapDelId(null);
+  }
 
   // Toggle d'une cible (pc1_on/pc2_on/pc3_on) sur la bonne table
   async function setPcFlag(line,key,val){
@@ -812,7 +1062,7 @@ function App(){
 
       {/* Tabs */}
       <div style={{display:'flex',gap:2,padding:'10px 24px',background:'#FFFFFF',borderBottom:'1px solid #EEEDE9',flexWrap:'wrap'}}>
-        {[{id:'portfolio',l:'📋 Portefeuille'},{id:'watchlist',l:'👁 Watchlist'},{id:'allocation',l:'🥧 Allocation'},{id:'cash',l:'💶 Liquidités'},{id:'sortis',l:'📤 Sortis'},{id:'editeur',l:'✏️ Éditeur'}].map(({id,l})=>(
+        {[{id:'portfolio',l:'📋 Portefeuille'},{id:'watchlist',l:'👁 Watchlist'},{id:'allocation',l:'🥧 Allocation'},{id:'cash',l:'💶 Liquidités'},{id:'risque',l:'📉 Risque'},{id:'sortis',l:'📤 Sortis'},{id:'editeur',l:'✏️ Éditeur'}].map(({id,l})=>(
           <button key={id} onClick={()=>setTab(id)}
             style={{...s.btn,background:tab===id?'#191919':'transparent',color:tab===id?'#FFFFFF':'#6B7280',padding:'7px 16px'}}>
             {l}
@@ -1368,6 +1618,178 @@ function App(){
             </div>
           </div>
         )}
+
+        {/* ── RISQUE / CORRÉLATIONS ── */}
+        {tab==='risque'&&(()=>{
+          const lastSnap=snapshots[0];
+          const daysSince=lastSnap?Math.floor((Date.now()-new Date(lastSnap.date+'T00:00:00').getTime())/86400000):null;
+          const stale=daysSince!=null&&daysSince>SNAP_STALE_DAYS;
+          const mat=riskData?(riskMode==='eur'?riskData.matEur:riskData.matLocal):null;
+          const avg=riskData?(riskMode==='eur'?riskData.avgEur:riskData.avgLocal):null;
+          const ecart=riskData&&riskData.neffLocal!=null&&riskData.neffEur!=null?riskData.neffLocal-riskData.neffEur:null;
+          const card={background:'#F7F6F3',borderRadius:10,border:'1px solid #EEEDE9',padding:'12px 16px',minWidth:150};
+          return(
+          <div>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14,flexWrap:'wrap',gap:10}}>
+              <div style={{maxWidth:640}}>
+                <div style={{fontWeight:700,fontSize:16}}>Corrélations & concentration</div>
+                <div style={{fontSize:12,color:'#9CA3AF',marginTop:2,lineHeight:1.5}}>
+                  Sur les <strong>positions détenues</strong> uniquement (hors watchlist et cash). Combien de paris vraiment indépendants se cachent derrière mes lignes ? Calcul à la demande — l'historique Yahoo n'est tiré que sur clic.
+                </div>
+              </div>
+              <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={computeRisk} disabled={riskBusy}>
+                {riskBusy?'⟳ Calcul…':riskData?'⟳ Recalculer':'📊 Calculer les corrélations'}
+              </button>
+            </div>
+
+            {lastSnap&&(
+              <div style={{fontSize:12,marginBottom:12,color:stale?'#D97706':'#9CA3AF'}}>
+                {stale?'⚠ ':'• '}Dernier instantané enregistré le {fmtDate(lastSnap.date)} ({daysSince} jour{daysSince>1?'s':''}){stale?' — pense à recalculer après tes derniers mouvements.':''}
+              </div>
+            )}
+            {riskErr&&<div style={{fontSize:13,color:'#DC2626',marginBottom:12}}>⚠️ {riskErr}</div>}
+            {riskBusy&&<div style={{fontSize:13,color:'#CF6D56',marginBottom:12}}>Téléchargement de l'historique 3 ans et calcul des matrices…</div>}
+
+            {!riskData&&!riskBusy&&(
+              <div style={{...s.card,textAlign:'center',color:'#9CA3AF',padding:40}}>
+                Lance un calcul pour afficher la matrice de corrélation et le nombre effectif de paris.
+              </div>
+            )}
+
+            {riskData&&(
+              <Fragment>
+                {/* Synthèse */}
+                <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:16}}>
+                  <div style={card}>
+                    <div style={{fontSize:10,color:'#9CA3AF',textTransform:'uppercase',letterSpacing:'0.05em'}}>N_eff métier</div>
+                    <div style={{fontWeight:800,fontSize:24,marginTop:2}}>{fmt(riskData.neffLocal,1)}</div>
+                    <div style={{fontSize:10,color:'#9CA3AF',marginTop:2}}>paris industriels indépendants</div>
+                  </div>
+                  <div style={card}>
+                    <div style={{fontSize:10,color:'#9CA3AF',textTransform:'uppercase',letterSpacing:'0.05em'}}>N_eff € (mon portefeuille)</div>
+                    <div style={{fontWeight:800,fontSize:24,marginTop:2}}>{fmt(riskData.neffEur,1)}</div>
+                    <div style={{fontSize:10,color:'#9CA3AF',marginTop:2}}>change inclus — toujours ≤ métier</div>
+                  </div>
+                  <div style={{...card,background:'#1E293B',border:'none'}}>
+                    <div style={{fontSize:10,color:'#94A3B8',textTransform:'uppercase',letterSpacing:'0.05em'}}>Dépendance au change</div>
+                    <div style={{fontWeight:800,fontSize:24,marginTop:2,color:'#fff'}}>{ecart==null?'—':'−'+fmt(ecart,1)}</div>
+                    <div style={{fontSize:10,color:'#94A3B8',marginTop:2}}>paris perdus via le $ / CAD / DKK</div>
+                  </div>
+                  <div style={card}>
+                    <div style={{fontSize:10,color:'#9CA3AF',textTransform:'uppercase',letterSpacing:'0.05em'}}>Corrélation moyenne</div>
+                    <div style={{fontWeight:800,fontSize:24,marginTop:2}}>{fmt(avg,2)}</div>
+                    <div style={{fontSize:10,color:'#9CA3AF',marginTop:2}}>pondérée ({riskMode==='eur'?'€':'métier'})</div>
+                  </div>
+                  <div style={card}>
+                    <div style={{fontSize:10,color:'#9CA3AF',textTransform:'uppercase',letterSpacing:'0.05em'}}>Lignes</div>
+                    <div style={{fontWeight:800,fontSize:24,marginTop:2}}>{riskData.core.length}<span style={{fontSize:13,color:'#9CA3AF',fontWeight:600}}> / {riskData.tickers.length}</span></div>
+                    <div style={{fontSize:10,color:'#9CA3AF',marginTop:2}}>{riskData.excluded.length} exclue(s) du N_eff (&lt; 2 ans)</div>
+                  </div>
+                </div>
+
+                {/* Toggle + heatmap */}
+                <div style={s.card}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:10}}>
+                    <div style={{display:'flex',gap:3}}>
+                      <button onClick={()=>setRiskMode('local')} style={{...s.btn,background:riskMode==='local'?'#191919':'#F0EFE9',color:riskMode==='local'?'#fff':'#6B7280',padding:'5px 14px',fontSize:12}}>Métier (devise locale)</button>
+                      <button onClick={()=>setRiskMode('eur')} style={{...s.btn,background:riskMode==='eur'?'#191919':'#F0EFE9',color:riskMode==='eur'?'#fff':'#6B7280',padding:'5px 14px',fontSize:12}}>Mon portefeuille (€)</button>
+                    </div>
+                    <div style={{fontSize:12,color:'#9CA3AF',maxWidth:380}}>
+                      {riskMode==='eur'?'Le facteur de change commun gonfle les corrélations entre lignes non-€ : c\u2019est ton risque réel d\u2019investisseur en euros.':'Chaque action mesurée dans sa propre monnaie : la parenté économique pure, sans effet de change.'}
+                    </div>
+                  </div>
+                  <Heatmap tickers={riskData.tickers} matrix={mat}/>
+                  {/* Légende */}
+                  <div style={{display:'flex',gap:14,flexWrap:'wrap',marginTop:14}}>
+                    {CORR_BANDS.map(b=>(
+                      <div key={b.l} style={{display:'flex',alignItems:'center',gap:6}}>
+                        <div style={{width:12,height:12,borderRadius:3,background:b.c,border:b.c==='#F0EFE9'?'1px solid #E0DED8':'none'}}/>
+                        <span style={{fontSize:11,color:'#6B7280'}}>{b.l}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{fontSize:11,color:'#D1D5DB',marginTop:10,lineHeight:1.6}}>
+                    Corrélations sur <strong>3 ans</strong>, rendements <strong>hebdomadaires</strong> (Pearson sur rendements log). Cellules = coefficient ×100. Lignes ordonnées par secteur → les grappes ressortent sur la diagonale. Paires à moins d'un an de recouvrement commun affichées « n/a ». <strong>Lis les blocs de couleur, pas les décimales</strong> : chaque coefficient porte ±0,06 d'incertitude. Et rappel : en vraie crise, tout converge vers 1 — ceci cartographie le régime normal, pas le krach.
+                  </div>
+                </div>
+
+                {/* Enregistrer un instantané */}
+                <div style={{...s.card,marginTop:16}}>
+                  <div style={{fontWeight:700,marginBottom:4}}>Enregistrer cet instantané</div>
+                  <div style={{fontSize:12,color:'#9CA3AF',marginBottom:10}}>Fige les métriques de synthèse + la composition du jour pour suivre la dérive dans le temps. La matrice complète n'est pas stockée (illisible et reconstituable).</div>
+                  <textarea style={{...s.inp,width:'100%',minHeight:60,resize:'vertical',fontFamily:'inherit'}} placeholder="Note libre (facultatif) : ex. « renforcé MELI, sorti TTD — surveiller la grappe pub GOOGL/META »"
+                    value={riskNote} onChange={e=>setRiskNote(e.target.value)}/>
+                  <div style={{fontSize:11,color:'#9CA3AF',margin:'10px 0 4px',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.05em'}}>Lecture auto-générée (aperçu)</div>
+                  <div style={{fontSize:12,color:'#6B7280',background:'#FAFAF8',border:'1px solid #EEEDE9',borderRadius:6,padding:'8px 12px',lineHeight:1.5}}>{buildAutoSummary(riskData,snapshots[0])}</div>
+                  <button style={{...s.btn,background:'#CF6D56',color:'#fff',marginTop:12}} onClick={saveSnapshot}>💾 Enregistrer l'instantané</button>
+                </div>
+              </Fragment>
+            )}
+
+            {/* Historique des instantanés */}
+            <div style={{...s.card,marginTop:16}}>
+              <div style={{fontWeight:700,marginBottom:12}}>Historique des instantanés</div>
+              <div style={{overflowX:'auto'}}>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                  <thead><tr>
+                    <th style={{...s.th,width:28}}></th>
+                    <th style={s.th}>Date</th><th style={s.th}>N_eff €</th><th style={s.th}>N_eff métier</th>
+                    <th style={s.th}>Corr. moy.</th><th style={s.th}>Paire la plus liée</th><th style={s.th}>Lignes</th><th style={s.th}></th>
+                  </tr></thead>
+                  <tbody>
+                    {snapshots.length===0&&<tr><td colSpan={8} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:32}}>Aucun instantané — calcule puis enregistre pour démarrer le suivi.</td></tr>}
+                    {snapshots.map(sn=>{
+                      const open=snapOpen.has(sn.id);
+                      const tp=sn.top_pair;
+                      return(
+                        <Fragment key={sn.id}>
+                          {snapDelId===sn.id?(
+                            <tr style={{background:'#FEF2F2'}}><td colSpan={8} style={{...s.td,padding:'12px 16px'}}>
+                              <span style={{color:'#DC2626'}}>Supprimer l'instantané du {fmtDate(sn.date)} ?</span>
+                              <button style={{...s.btn,background:'#DC2626',color:'#fff',marginLeft:14,padding:'3px 12px',fontSize:12}} onClick={()=>delSnapshot(sn.id)}>Confirmer</button>
+                              <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',marginLeft:6,padding:'3px 12px',fontSize:12}} onClick={()=>setSnapDelId(null)}>Annuler</button>
+                            </td></tr>
+                          ):(
+                            <tr onClick={()=>setSnapOpen(prev=>{const n=new Set(prev);n.has(sn.id)?n.delete(sn.id):n.add(sn.id);return n;})}
+                              style={{cursor:'pointer'}}
+                              onMouseEnter={e=>e.currentTarget.style.background='#FAFAF8'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                              <td style={{...s.td,color:'#9CA3AF',fontSize:12}}>{open?'▾':'▸'}</td>
+                              <td style={{...s.td,fontWeight:600}}>{fmtDate(sn.date)}</td>
+                              <td style={{...s.td,color:'#6B7280'}}>{fmt(sn.n_eff_eur,1)}</td>
+                              <td style={{...s.td,color:'#6B7280'}}>{fmt(sn.n_eff_metier,1)}</td>
+                              <td style={{...s.td,color:'#6B7280'}}>{fmt(sn.corr_moyenne,2)}</td>
+                              <td style={{...s.td,color:'#6B7280'}}>{tp?`${shortTk(tp.a)}×${shortTk(tp.b)} (${fmt(tp.r,2)})`:'—'}</td>
+                              <td style={{...s.td,color:'#6B7280'}}>{sn.n_lines_incl}{sn.n_lines_excl?` (+${sn.n_lines_excl})`:''}</td>
+                              <td style={s.td}><button style={{...s.btn,background:'#FEE2E2',color:'#DC2626',padding:'3px 10px',fontSize:12}} onClick={e=>{e.stopPropagation();setSnapDelId(sn.id);}}>🗑️</button></td>
+                            </tr>
+                          )}
+                          {open&&snapDelId!==sn.id&&(
+                            <tr><td colSpan={8} style={{padding:'12px 24px',background:'#FAFAF8',borderBottom:'1px solid #EEEDE9'}}>
+                              <div style={{fontSize:11,color:'#9CA3AF',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:4}}>Lecture auto-générée</div>
+                              <div style={{fontSize:12,color:'#6B7280',marginBottom:10,lineHeight:1.5}}>{sn.auto_summary||'—'}</div>
+                              {sn.note&&<Fragment>
+                                <div style={{fontSize:11,color:'#9CA3AF',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:4}}>Ma note</div>
+                                <div style={{fontSize:13,color:'#191919',marginBottom:10,lineHeight:1.5,whiteSpace:'pre-wrap'}}>{sn.note}</div>
+                              </Fragment>}
+                              {sn.composition&&<div style={{fontSize:11,color:'#9CA3AF'}}>Composition ({Object.keys(sn.composition).length} lignes) : {Object.entries(sn.composition).sort((a,b)=>b[1]-a[1]).map(([t,v])=>`${shortTk(t)} ${m(fmtEUR(v))}`).join(' · ')}</div>}
+                            </td></tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div style={{...s.card,marginTop:16,background:'#FAFAF8'}}>
+              <div style={{fontSize:12,color:'#6B7280',lineHeight:1.7}}>
+                <strong>Comment lire le N_eff.</strong> C'est le nombre de paris réellement indépendants derrière tes lignes, pondéré par tes poids (renforcer une grappe corrélée le fait baisser). Calculé via 1 ÷ (wᵀ·R·w) — une formule pondérée plutôt que le ratio de participation des valeurs propres dont je t'avais parlé, justement parce que celle-ci réagit à tes arbitrages et devient donc utile à suivre dans le temps. L'écart <em>N_eff métier − N_eff €</em> chiffre ce que le change te coûte en diversification : « 8 paris métier mais 6 une fois le dollar pris en compte » = le $ te mange ~2 paris.
+              </div>
+            </div>
+          </div>
+          );
+        })()}
 
         {/* ── ÉDITEUR ── */}
         {tab==='editeur'&&(
