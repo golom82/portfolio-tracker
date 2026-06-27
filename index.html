@@ -650,19 +650,18 @@ function App(){
       if(x.date&&(last==null||x.date>=last)){last=x.date;lastType=x.type;} });
     const holdM=monthsElapsed(holdStart);           // détention EN COURS (repart de 0 après un aller-retour soldé)
     const sinceM=monthsElapsed(last);
-    let tri=null;
-    if(holdStart&&qte>0&&valEUR!=null&&holdM!=null&&holdM>=6){
-      const flows=[...periodFlows];
-      cashFlows.filter(x=>x.type==='dividende'&&x.ticker===p.ticker&&x.env===p.env&&x.date>=holdStart).forEach(x=>flows.push({date:x.date,amount:num(x.montant)}));
-      flows.push({date:new Date().toISOString().slice(0,10),amount:valEUR});
-      tri=xirr(flows);
+    let triFlows=null, tri=null;
+    if(holdStart&&qte>0){
+      triFlows=[...periodFlows];   // achats/ventes de la détention en cours + dividendes de la période (SANS la valo terminale)
+      cashFlows.filter(x=>x.type==='dividende'&&x.ticker===p.ticker&&x.env===p.env&&x.date>=holdStart).forEach(x=>triFlows.push({date:x.date,amount:num(x.montant)}));
+      if(valEUR!=null&&holdM!=null&&holdM>=6) tri=xirr([...triFlows,{date:new Date().toISOString().slice(0,10),amount:valEUR}]);
     }
     const pc2=p.pc1>0?p.pc1*(1-p.mos/200):0;
     const pc3=p.pc1>0?p.pc1*(1-p.mos/100):0;
     const mos1=cours&&p.pc1?((p.pc1-cours)/p.pc1)*100:null;
     const mos2=cours&&pc2?((pc2-cours)/pc2)*100:null;
     const mos3=cours&&pc3?((pc3-cours)/pc3)*100:null;
-    return {mv,cours,cur,qte,buyEUR,sellEUR,investedEUR,valEUR,divEUR,realizedGain,realized,latent,result,firstBuy,last,lastType,holdM,sinceM,tri,pc2,pc3,mos1,mos2,mos3};
+    return {mv,cours,cur,qte,buyEUR,sellEUR,investedEUR,valEUR,divEUR,realizedGain,realized,latent,result,firstBuy,last,lastType,holdM,sinceM,tri,triFlows,pc2,pc3,mos1,mos2,mos3};
   }
 
   // Fusionne plusieurs lignes d'un même ticker (ex. PEA + CTO) en une synthèse unique.
@@ -1016,6 +1015,26 @@ function App(){
   const totalValEUR =held.reduce((a,p)=>a+(calc[p.id].valEUR||0),0);
   const totalInvEUR =held.reduce((a,p)=>a+(calc[p.id].investedEUR||0),0);
 
+  // ── TRI agrégé du portefeuille — DEPUIS L'ORIGINE (titres, money-weighted) ──
+  // Tous les flux de TOUS les titres jamais détenus (achats −, ventes +, dividendes +) — lignes soldées
+  // et allers-retours passés inclus — + valo des titres encore détenus en terminal. Mesure la performance
+  // money-weighted de toute l'activité boursière. Basé sur les trades (pas sur les apports) → robuste, et
+  // indépendant des livrets. À distinguer des pastilles PAR LIGNE, qui restent sur la détention en cours.
+  const lifeFlows=[];
+  pos.forEach(p=>{ if(p.env===WL_ENV) return;
+    (Array.isArray(p.mouvements)?p.mouvements:[]).forEach(mvt=>{ const mt=num(mvt.montant); if(mt===0) return; // 0 € inerte
+      lifeFlows.push({date:mvt.date, amount: mvt.type==='vente'? mt : -mt}); });
+  });
+  cashFlows.filter(x=>x.type==='dividende').forEach(x=>{ const mt=num(x.montant); if(mt) lifeFlows.push({date:x.date, amount:mt}); });
+  let portTRI=null, portSpan=null;
+  // Résultat total cumulé = réalisé (titres soldés inclus) + latent (titres détenus)
+  const portResult=pos.filter(p=>p.env!==WL_ENV).reduce((a,p)=>a+(calc[p.id].result||0),0);
+  if(lifeFlows.length){
+    const ds=lifeFlows.map(f=>f.date).filter(Boolean).sort();
+    portSpan=ds.length?monthsElapsed(ds[0]):null;
+    if(portSpan!=null&&portSpan>=6) portTRI=xirr([...lifeFlows,{date:new Date().toISOString().slice(0,10),amount:totalValEUR}]);
+  }
+
   // ── Cash par enveloppe = Σapports − Σretraits − Σachats(env) + Σventes(env) ──
   const cashByEnv={}; ENVS.forEach(e=>cashByEnv[e]=0);
   cashFlows.forEach(c=>{ if(cashByEnv[c.env]!=null) cashByEnv[c.env]+= c.type==='retrait'?-num(c.montant):num(c.montant); });
@@ -1153,11 +1172,14 @@ function App(){
         {[{l:'Positions',v:held.length},{l:'PEA',v:held.filter(p=>p.env==='PEA').length+' pos.'},{l:'CTO',v:held.filter(p=>p.env==='CTO').length+' pos.'},{l:'PER',v:held.filter(p=>p.env==='PER').length+' pos.'},
           {l:'Titres (€)',v:totalValEUR>0?m(fmtEUR(totalValEUR)):'—'},
           {l:'Liquidités (€)',v:totalCashAll!==0?m(fmtEUR(totalCashAll)):'—',clr:totalCashAll<0?'#DC2626':null},
-          {l:'Total titres+cash (€)',v:grandTotal!==0?m(fmtEUR(grandTotal)):'—'}]
-          .map(({l,v,clr})=>(
+          {l:'Total titres+cash (€)',v:grandTotal!==0?m(fmtEUR(grandTotal)):'—',dot:true}]
+          .map(({l,v,clr,dot})=>(
           <div key={l} style={{flex:'none',minWidth:120,padding:'10px 14px',background:'#F7F6F3',borderRadius:10,border:'1px solid #EEEDE9'}}>
             <div style={{fontSize:10,color:'#9CA3AF',marginBottom:4,textTransform:'uppercase',letterSpacing:'0.05em'}}>{l}</div>
-            <div style={{fontWeight:700,fontSize:15,color:clr||'#191919'}}>{v}</div>
+            <div style={{fontWeight:700,fontSize:15,color:clr||'#191919',display:'flex',alignItems:'center',gap:8}}>
+              {v}
+              {dot&&<span title={'TRI des titres depuis l\u2019origine (money-weighted, lignes soldées incluses, hors cash)'}><PerfDot tri={portTRI} holdM={portSpan} result={portResult} masked={hideAmt}/></span>}
+            </div>
           </div>
         ))}
       </div>
