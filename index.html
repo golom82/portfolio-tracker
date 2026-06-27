@@ -128,6 +128,45 @@ function pearson(a,b){
 const round2=n=>n==null?null:Math.round(n*100)/100;
 const round0=n=>n==null?null:Math.round(n);
 
+// ── Pastille de performance : TRI annualisé (money-weighted), rendu en échelle qualitative ──
+// Jamais de chiffre de perf affiché (anti-biais d'ancrage) : seule la couleur parle.
+// TRI = taux qui annule la VAN des flux datés en € (achats −, ventes + dividendes +, valo du jour +).
+function xirr(flows){
+  const fs=[...flows].filter(f=>f.date).sort((a,b)=>a.date.localeCompare(b.date));
+  if(fs.length<2) return null;
+  const t0=new Date(fs[0].date+'T00:00:00').getTime();
+  const yr=f=>(new Date(f.date+'T00:00:00').getTime()-t0)/(365*86400000);
+  const npv=r=>fs.reduce((s,f)=>s+f.amount/Math.pow(1+r,yr(f)),0);
+  let lo=-0.9999,hi=1000,flo=npv(lo),fhi=npv(hi);
+  if(!isFinite(flo)||!isFinite(fhi)||flo*fhi>0) return null;   // pas de changement de signe → pas de racine exploitable
+  for(let i=0;i<200;i++){const mid=(lo+hi)/2,fm=npv(mid);
+    if(Math.abs(fm)<1e-7||hi-lo<1e-9) return mid;
+    if(flo*fm<0){hi=mid;}else{lo=mid;flo=fm;}}
+  return (lo+hi)/2;
+}
+// Échelle décroissante (couleurs distinctes, sans « or » jaunâtre) : vert > violet > bleu > gris > orange > rouge > noir
+const PERF_BANDS=[
+  {min:15,   c:'#16A34A', l:'≥ +15 %/an'},
+  {min:10,   c:'#7C3AED', l:'+10 à +15 %/an'},
+  {min:5,    c:'#2563EB', l:'+5 à +10 %/an'},
+  {min:-5,   c:'#9CA3AF', l:'−5 à +5 %/an'},
+  {min:-10,  c:'#D97706', l:'−10 à −5 %/an'},
+  {min:-15,  c:'#DC2626', l:'−15 à −10 %/an'},
+  {min:-1e9, c:'#191919', l:'< −15 %/an'},
+];
+const perfBand=tri=>{if(tri==null)return null;const p=tri*100;return PERF_BANDS.find(b=>p>=b.min);};
+
+function PerfDot({tri,holdM,result,masked}){
+  if(holdM==null||holdM<6){
+    return <span title="Détention en cours < 6 mois — rendement annualisé non significatif"
+      style={{display:'inline-flex',alignItems:'center',justifyContent:'center',width:16,height:16,borderRadius:'50%',background:'#F0EFE9',color:'#9CA3AF',fontSize:11,fontWeight:800}}>!</span>;
+  }
+  const b=perfBand(tri);
+  if(!b) return <span style={{color:'#D1D5DB'}}>—</span>;
+  const tip=masked?b.l:`${b.l} — Résultat total : ${result==null?'—':(result>=0?'+':'−')+fmtEUR(Math.abs(result))}`;
+  return <span title={tip} style={{display:'inline-block',width:14,height:14,borderRadius:'50%',background:b.c,boxShadow:'0 0 0 1.5px #FFF, 0 0 0 2.5px '+b.c+'66'}}/>;
+}
+
 const CASH_TYPES = ['apport','retrait','dividende']; // apport/dividende = +cash, retrait = −cash
 const FX_TICKERS = ['EURUSD=X','EURCAD=X','EURDKK=X'];
 
@@ -472,6 +511,27 @@ function CashForm({init,onSave,onCancel,isNew=false,s,tickers=[]}){
   );
 }
 
+function BucketForm({init,onSave,onCancel,isNew=false,s}){
+  const [f,setF]=useState({name:'Livrets',montant:'',...init});
+  const upd=(k,v)=>setF(p=>({...p,[k]:v}));
+  return(
+    <div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+        <div><label style={s.lbl}>Nom de la poche</label>
+          <input style={s.inp} type="text" placeholder="ex. Livret A, LDDS, fonds €…" value={f.name??''} onChange={e=>upd('name',e.target.value)}/>
+        </div>
+        <div><label style={s.lbl}>Solde actuel (€)</label>
+          <input style={s.inp} type="text" inputMode="decimal" placeholder="ex. 22 950,00" value={f.montant??''} onChange={e=>upd('montant',e.target.value)}/>
+        </div>
+      </div>
+      <div style={{display:'flex',gap:8,marginTop:14}}>
+        <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>onSave({...f,montant:num(f.montant)})}>{isNew?'+ Ajouter':'✓ Sauvegarder'}</button>
+        <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280'}} onClick={onCancel}>Annuler</button>
+      </div>
+    </div>
+  );
+}
+
 function TitleStats({c,mask}){
   const M=mask||(v=>v);
   const sign=n=>n==null?'#9CA3AF':n>=0?'#16A34A':'#DC2626';
@@ -524,6 +584,11 @@ function App(){
   const [cashDelId, setCashDelId] = useState(null);
   const [cashEnvFilter,setCashEnvFilter]=useState('ALL');
   const [cashYear,setCashYear]=useState('ALL');
+  // Poche(s) de cash externe (livrets) : pas de mouvements, solde édité à la volée. Hors enveloppes.
+  const [buckets,   setBuckets]   = useState([]);
+  const [bucketAdding,setBucketAdding]=useState(false);
+  const [bucketEditId,setBucketEditId]=useState(null);
+  const [bucketDelId, setBucketDelId] =useState(null);
   const [editorTab,setEditorTab]=useState('portfolio'); // sous-onglet éditeur : portfolio / watchlist / sortis
   // ── État module Risque ──
   const [riskBusy,  setRiskBusy]  = useState(false);
@@ -553,6 +618,7 @@ function App(){
     const ordered=[...mv].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
     let buyQ=0,buyEUR=0,sellQ=0,sellEUR=0;          // cumuls bruts (affichage)
     let runQ=0,runCost=0,realizedGain=0;            // qté détenue, coût de revient € détenu, PV réalisée €
+    let holdStart=null, periodFlows=[];             // début de la détention EN COURS + flux datés (pour le TRI)
     ordered.forEach(x=>{
       const q=num(x.qte), mt=num(x.montant);
       if(x.type==='vente'){
@@ -561,9 +627,12 @@ function App(){
         const coutVendu=Math.min(pru*q, runCost);   // coût de revient des titres sortis (PRU du moment)
         realizedGain += mt - coutVendu;             // produit − coût = plus-value réalisée
         runQ=Math.max(runQ-q,0); runCost=Math.max(runCost-coutVendu,0);
+        periodFlows.push({date:x.date,amount:mt});  // vente = entrée
       }else{
+        if(runQ===0){ holdStart=x.date; periodFlows=[]; } // 0 → >0 : nouvelle période de détention
         buyQ+=q; buyEUR+=mt;
         runQ+=q; runCost+=mt;                        // renforcement : le PRU se recalcule de fait
+        periodFlows.push({date:x.date,amount:-mt}); // achat = sortie
       }
     });
     const qte=runQ;
@@ -579,14 +648,21 @@ function App(){
     let last=null,lastType=null;
     mv.forEach(x=>{ if(num(x.montant)===0) return;   // mouvement à 0 € (frais/ajustement) : ignoré pour le « dernier mouvement »
       if(x.date&&(last==null||x.date>=last)){last=x.date;lastType=x.type;} });
-    const holdM=monthsElapsed(firstBuy);
+    const holdM=monthsElapsed(holdStart);           // détention EN COURS (repart de 0 après un aller-retour soldé)
     const sinceM=monthsElapsed(last);
+    let tri=null;
+    if(holdStart&&qte>0&&valEUR!=null&&holdM!=null&&holdM>=6){
+      const flows=[...periodFlows];
+      cashFlows.filter(x=>x.type==='dividende'&&x.ticker===p.ticker&&x.env===p.env&&x.date>=holdStart).forEach(x=>flows.push({date:x.date,amount:num(x.montant)}));
+      flows.push({date:new Date().toISOString().slice(0,10),amount:valEUR});
+      tri=xirr(flows);
+    }
     const pc2=p.pc1>0?p.pc1*(1-p.mos/200):0;
     const pc3=p.pc1>0?p.pc1*(1-p.mos/100):0;
     const mos1=cours&&p.pc1?((p.pc1-cours)/p.pc1)*100:null;
     const mos2=cours&&pc2?((pc2-cours)/pc2)*100:null;
     const mos3=cours&&pc3?((pc3-cours)/pc3)*100:null;
-    return {mv,cours,cur,qte,buyEUR,sellEUR,investedEUR,valEUR,divEUR,realizedGain,realized,latent,result,firstBuy,last,lastType,holdM,sinceM,pc2,pc3,mos1,mos2,mos3};
+    return {mv,cours,cur,qte,buyEUR,sellEUR,investedEUR,valEUR,divEUR,realizedGain,realized,latent,result,firstBuy,last,lastType,holdM,sinceM,tri,pc2,pc3,mos1,mos2,mos3};
   }
 
   // Fusionne plusieurs lignes d'un même ticker (ex. PEA + CTO) en une synthèse unique.
@@ -600,6 +676,7 @@ function App(){
     group.forEach(p=>(Array.isArray(p.mouvements)?p.mouvements:[]).forEach(mvt=>allMv.push({...mvt,env:p.env})));
     const ordered=[...allMv].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
     let buyEUR=0,sellEUR=0,runQ=0,runCost=0,realizedGain=0;
+    let holdStart=null, periodFlows=[];
     ordered.forEach(x=>{
       const q=num(x.qte), mt=num(x.montant);
       if(x.type==='vente'){
@@ -608,7 +685,12 @@ function App(){
         const coutVendu=Math.min(pru*q, runCost);
         realizedGain += mt - coutVendu;
         runQ=Math.max(runQ-q,0); runCost=Math.max(runCost-coutVendu,0);
-      }else{ buyEUR+=mt; runQ+=q; runCost+=mt; }
+        periodFlows.push({date:x.date,amount:mt});
+      }else{
+        if(runQ===0){ holdStart=x.date; periodFlows=[]; }
+        buyEUR+=mt; runQ+=q; runCost+=mt;
+        periodFlows.push({date:x.date,amount:-mt});
+      }
     });
     const qte=runQ;
     const investedEUR=buyEUR-sellEUR;
@@ -623,8 +705,15 @@ function App(){
     let last=null,lastType=null;
     allMv.forEach(x=>{ if(num(x.montant)===0) return;
       if(x.date&&(last==null||x.date>=last)){last=x.date;lastType=x.type;} });
-    const holdM=monthsElapsed(firstBuy), sinceM=monthsElapsed(last);
-    return {ticker,name,cat,envs,group,mv:ordered,cours,cur,qte,buyEUR,sellEUR,investedEUR,valEUR,divEUR,realizedGain,realized,latent,result,firstBuy,last,lastType,holdM,sinceM};
+    const holdM=monthsElapsed(holdStart), sinceM=monthsElapsed(last);
+    let tri=null;
+    if(holdStart&&qte>0&&valEUR!=null&&holdM!=null&&holdM>=6){
+      const flows=[...periodFlows];
+      cashFlows.filter(x=>x.type==='dividende'&&x.ticker===ticker&&envs.includes(x.env)&&x.date>=holdStart).forEach(x=>flows.push({date:x.date,amount:num(x.montant)}));
+      flows.push({date:new Date().toISOString().slice(0,10),amount:valEUR});
+      tri=xirr(flows);
+    }
+    return {ticker,name,cat,envs,group,mv:ordered,cours,cur,qte,buyEUR,sellEUR,investedEUR,valEUR,divEUR,realizedGain,realized,latent,result,firstBuy,last,lastType,holdM,sinceM,tri};
   }
 
   useEffect(()=>{init();},[]);
@@ -645,6 +734,8 @@ function App(){
     setCashFlows(cashData||[]);
     const {data:snapData}=await db.from('risk_snapshots').select('*').order('date',{ascending:false});
     setSnapshots(snapData||[]);
+    const {data:bucketData}=await db.from('cash_buckets').select('*').order('id');
+    setBuckets(bucketData||[]);
     await doFetch(positions,watchlist);
     setLoading(false);
   }
@@ -870,6 +961,16 @@ function App(){
     setSnapshots(snapshots.filter(x=>x.id!==id));setSnapDelId(null);
   }
 
+  // Cash externe (livrets) CRUD
+  async function addBucket(f){const rec={name:f.name||'Livrets',montant:num(f.montant)};const {data,error}=await db.from('cash_buckets').insert([rec]).select();if(error){setError('Ajout livret : '+error.message);return;}if(data)setBuckets([...buckets,...data]);setBucketAdding(false);}
+  async function updBucket(f){
+    const patch=stripMeta({...f,montant:num(f.montant)});
+    const {error}=await db.from('cash_buckets').update(patch).eq('id',f.id);
+    if(error){setError('MAJ livret : '+error.message);return;}
+    setBuckets(buckets.map(x=>x.id===f.id?{...x,...patch}:x));setBucketEditId(null);
+  }
+  async function delBucket(id){await db.from('cash_buckets').delete().eq('id',id);setBuckets(buckets.filter(x=>x.id!==id));setBucketDelId(null);}
+
   // Toggle d'une cible (pc1_on/pc2_on/pc3_on) sur la bonne table
   async function setPcFlag(line,key,val){
     if(line.wlType==='watch'){
@@ -926,8 +1027,10 @@ function App(){
     });
   });
   const totalCash = ENVS.reduce((a,e)=>a+cashByEnv[e],0);
-  const grandTotal = totalValEUR + totalCash;          // titres + cash
-  const cashTickers = [...new Map(held.map(p=>[p.ticker,{ticker:p.ticker,name:p.name}])).values()]; // dividendes : titres détenus uniquement
+  const extCash = buckets.reduce((a,b)=>a+num(b.montant),0);   // livrets externes (hors enveloppes)
+  const totalCashAll = totalCash + extCash;                    // cash réellement disponible (enveloppes + livrets)
+  const grandTotal = totalValEUR + totalCashAll;               // titres + cash
+  const cashTickers = [...new Map(held.map(p=>[p.ticker,{ticker:p.ticker,name:p.name}])).values()].sort((a,b)=>a.ticker.localeCompare(b.ticker)); // dividendes : titres détenus uniquement, triés A→Z
   // Registre cash fusionné (flux + trades) pour l'enveloppe filtrée, trié chrono + solde cumulé
   const cashLedger=(()=>{
     const evs=[];
@@ -969,17 +1072,16 @@ function App(){
   const byEnv=ENVS.map(e=>({name:e,value:Math.round(held.filter(p=>p.env===e).reduce((a,p)=>a+(calc[p.id].valEUR||0),0)+(inclCash?cashByEnv[e]:0))})).filter(x=>x.value>0);
   // Allocation par catégorie : titres + une part Liquidités si activé
   const byCat=CATS.map(c=>({name:c,value:Math.round(held.filter(p=>p.cat===c).reduce((a,p)=>a+(calc[p.id].valEUR||0),0))}))
-    .concat(inclCash&&totalCash>0?[{name:'Liquidités',value:Math.round(totalCash)}]:[]).filter(x=>x.value>0);
-  const byTitleInv=posRankedEUR.filter(p=>p.invEUR>0).map(p=>({name:p.ticker,value:Math.round(p.invEUR),cat:p.cat})).sort((a,b)=>b.value-a.value);
-  const byTitleVal=posRankedEUR.filter(p=>p.valEUR>0).map(p=>({name:p.ticker,value:Math.round(p.valEUR),cat:p.cat})).sort((a,b)=>b.value-a.value)
-    .concat(inclCash&&totalCash>0?[{name:'Liquidités',value:Math.round(totalCash),cat:'Liquidités'}]:[]);
-  const titleColors={}; [...new Set([...byTitleInv,...byTitleVal].map(x=>x.name))].forEach((t,i)=>{titleColors[t]=(t==='Liquidités'||t.startsWith('Cash '))?CASH_CLR:sliceColor(i);});
+    .concat(inclCash&&totalCashAll>0?[{name:'Liquidités',value:Math.round(totalCashAll)}]:[]).filter(x=>x.value>0);
+  const byTitleInv=posRankedEUR.filter(p=>p.invEUR>0).map(p=>({name:p.ticker,value:Math.round(p.invEUR),cat:p.cat,secteur:p.secteur||SECTEUR_NA})).sort((a,b)=>b.value-a.value);
+  const byTitleVal=posRankedEUR.filter(p=>p.valEUR>0).map(p=>({name:p.ticker,value:Math.round(p.valEUR),cat:p.cat,secteur:p.secteur||SECTEUR_NA})).sort((a,b)=>b.value-a.value)
+    .concat(inclCash&&totalCashAll>0?[{name:'Liquidités',value:Math.round(totalCashAll),cat:'Liquidités',secteur:'Liquidités'}]:[]);
 
   // ── Allocation par SECTEUR (partition : 1 valeur/titre ; Liquidités en tranche si cash inclus) ──
   const secMap={};
   held.forEach(p=>{const sec=p.secteur||SECTEUR_NA;secMap[sec]=(secMap[sec]||0)+(calc[p.id].valEUR||0);});
   const bySecteur=Object.entries(secMap).map(([name,value])=>({name,value:Math.round(value)})).filter(x=>x.value>0)
-    .concat(inclCash&&totalCash>0?[{name:'Liquidités',value:Math.round(totalCash)}]:[])
+    .concat(inclCash&&totalCashAll>0?[{name:'Liquidités',value:Math.round(totalCashAll)}]:[])
     .sort((a,b)=>b.value-a.value);
   // ── Exposition THÉMATIQUE (projecteurs : multi-valeurs → barres, % de la valo titres, total ≠ 100 %) ──
   const themeMap={}; THEMES.forEach(t=>themeMap[t]=0);
@@ -1050,7 +1152,7 @@ function App(){
       <div style={{display:'flex',gap:10,padding:'12px 24px',background:'#FFFFFF',borderBottom:'1px solid #EEEDE9',overflowX:'auto'}}>
         {[{l:'Positions',v:held.length},{l:'PEA',v:held.filter(p=>p.env==='PEA').length+' pos.'},{l:'CTO',v:held.filter(p=>p.env==='CTO').length+' pos.'},{l:'PER',v:held.filter(p=>p.env==='PER').length+' pos.'},
           {l:'Titres (€)',v:totalValEUR>0?m(fmtEUR(totalValEUR)):'—'},
-          {l:'Liquidités (€)',v:totalCash!==0?m(fmtEUR(totalCash)):'—',clr:totalCash<0?'#DC2626':null},
+          {l:'Liquidités (€)',v:totalCashAll!==0?m(fmtEUR(totalCashAll)):'—',clr:totalCashAll<0?'#DC2626':null},
           {l:'Total titres+cash (€)',v:grandTotal!==0?m(fmtEUR(grandTotal)):'—'}]
           .map(({l,v,clr})=>(
           <div key={l} style={{flex:'none',minWidth:120,padding:'10px 14px',background:'#F7F6F3',borderRadius:10,border:'1px solid #EEEDE9'}}>
@@ -1101,13 +1203,14 @@ function App(){
                     <th style={{...s.th,width:28}}></th>
                     <th style={s.th}>Titre</th><th style={s.th}>Env.</th><th style={s.th}>Qté</th>
                     <th style={s.th}>Investi €</th><th style={s.th}>Valeur €</th>
+                    <th style={s.th}>Perf.</th>
                     <th style={s.th}>Détention</th><th style={s.th}>Dern. mvt</th>
                   </tr>
                 </thead>
                 <tbody>
                   {grouped.map(({cat,items})=>(
                     <Fragment key={cat}>
-                      <tr><td colSpan={8} style={{padding:'6px 12px',background:'#F7F6F3',fontSize:10,fontWeight:700,color:CAT_CLR[cat],textTransform:'uppercase',letterSpacing:'0.08em'}}>
+                      <tr><td colSpan={9} style={{padding:'6px 12px',background:'#F7F6F3',fontSize:10,fontWeight:700,color:CAT_CLR[cat],textTransform:'uppercase',letterSpacing:'0.08em'}}>
                         ▪ {cat} <span style={{color:'#9CA3AF',marginLeft:6}}>· {items.length} titre{items.length>1?'s':''} · {fmt(catWeight(cat),1)}% du portefeuille</span>
                       </td></tr>
                       {Object.values(items.reduce((acc,p)=>{(acc[p.ticker]=acc[p.ticker]||[]).push(p);return acc;},{})).map(group=>{
@@ -1123,6 +1226,7 @@ function App(){
                               <td style={{...s.td,color:'#6B7280'}}>{m(c.qte?fmtQte1(c.qte):'—')}</td>
                               <td style={{...s.td,color:'#6B7280'}}>{c.investedEUR?m(fmtEUR(c.investedEUR)):'—'}</td>
                               <td style={{...s.td,color:'#6B7280'}}>{c.valEUR?m(fmtEUR(c.valEUR)):'—'}</td>
+                              <td style={{...s.td,textAlign:'center'}}>{c.qte>0?<PerfDot tri={c.tri} holdM={c.holdM} result={c.result} masked={hideAmt}/>:'—'}</td>
                               <td style={{...s.td,color:'#6B7280'}}>{c.holdM==null?'—':c.holdM+' mois'}</td>
                               <td style={s.td}>
                                 {c.sinceM==null?'—':
@@ -1132,7 +1236,7 @@ function App(){
                               </td>
                             </tr>
                             {isExp&&(
-                              <tr><td colSpan={8} style={{padding:'14px 24px',background:'#FAFAF8',borderBottom:'1px solid #EEEDE9'}}>
+                              <tr><td colSpan={9} style={{padding:'14px 24px',background:'#FAFAF8',borderBottom:'1px solid #EEEDE9'}}>
                                 {/* Synthèse chiffrée du titre (poches fusionnées, PRU global) */}
                                 <TitleStats c={c} mask={m}/>
                                 <div style={{marginBottom:14}}>
@@ -1168,11 +1272,25 @@ function App(){
                       })}
                     </Fragment>
                   ))}
-                  {grouped.length===0&&<tr><td colSpan={8} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>Aucune position en portefeuille</td></tr>}
+                  {grouped.length===0&&<tr><td colSpan={9} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>Aucune position en portefeuille</td></tr>}
                 </tbody>
               </table>
             </div>
             <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>▸ Cliquez sur une ligne pour les prix cibles et l'historique des mouvements — 🔴 dernier mouvement = vente · les mouvements à 0 € (frais/ajustements) réduisent la quantité mais ne comptent ni comme dernier mouvement ni sur le cash</div>
+            <div style={{display:'flex',gap:14,flexWrap:'wrap',alignItems:'center',marginTop:10,padding:'10px 14px',background:'#FFFFFF',border:'1px solid #EEEDE9',borderRadius:8}}>
+              <span style={{fontSize:11,color:'#9CA3AF',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.05em'}}>Pastille — rendement annualisé (TRI) :</span>
+              {PERF_BANDS.map(b=>(
+                <span key={b.l} style={{display:'flex',alignItems:'center',gap:6}}>
+                  <span style={{width:12,height:12,borderRadius:'50%',background:b.c,flexShrink:0}}/>
+                  <span style={{fontSize:11,color:'#6B7280'}}>{b.l}</span>
+                </span>
+              ))}
+              <span style={{display:'flex',alignItems:'center',gap:6}}>
+                <span style={{display:'inline-flex',alignItems:'center',justifyContent:'center',width:14,height:14,borderRadius:'50%',background:'#F0EFE9',color:'#9CA3AF',fontSize:10,fontWeight:800}}>!</span>
+                <span style={{fontSize:11,color:'#6B7280'}}>détention &lt; 6 mois</span>
+              </span>
+              <span style={{fontSize:11,color:'#D1D5DB'}}>· survol = résultat total {hideAmt?'(masqué)':'en €'}</span>
+            </div>
           </div>
         )}
 
@@ -1292,26 +1410,32 @@ function App(){
               </span>
             </div>
 
-            {/* Camemberts par titre : investi vs valorisation */}
+            {/* Pondération par titre : barres triées (couleur = secteur), toutes lignes visibles */}
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:16}}>
               {[{title:'Pondération par titre — somme investie',data:byTitleInv},{title:'Pondération par titre — valorisation'+(inclCash?' (cash inclus)':''),data:byTitleVal}].map(({title,data})=>{
                 const tot=data.reduce((a,d)=>a+d.value,0);
+                const maxv=data.reduce((a,d)=>Math.max(a,d.value),0)||1;
                 return(
                   <div key={title} style={s.card}>
-                    <div style={{fontWeight:700,marginBottom:16}}>{title}</div>
-                    <div style={{display:'flex',alignItems:'flex-start',gap:20,flexWrap:'wrap'}}>
-                      <PieChart data={data} colorMap={titleColors}/>
-                      <div style={{display:'flex',flexDirection:'column',gap:5,maxHeight:200,overflowY:'auto',minWidth:160}}>
-                        {data.map(d=>(
-                          <div key={d.name} style={{display:'flex',alignItems:'center',gap:8}}>
-                            <div style={{width:10,height:10,borderRadius:2,background:titleColors[d.name],flexShrink:0}}/>
-                            <span style={{color:'#6B7280',fontSize:12,flex:1}}>{d.name}</span>
-                            <span style={{fontWeight:700,fontSize:12}}>{tot>0?Math.round(d.value/tot*100):0}%</span>
-                          </div>
-                        ))}
-                        {data.length===0&&<span style={{fontSize:12,color:'#D1D5DB'}}>Aucune donnée</span>}
+                    <div style={{fontWeight:700,marginBottom:14}}>{title}</div>
+                    {data.length===0?<span style={{fontSize:12,color:'#D1D5DB'}}>Aucune donnée</span>:(
+                      <div style={{display:'flex',flexDirection:'column',gap:7}}>
+                        {data.map(d=>{
+                          const clr=SECTEUR_CLR[d.secteur]||'#9CA3AF';
+                          const pct=tot>0?(d.value/tot*100):0;
+                          return(
+                            <div key={d.name} style={{display:'flex',alignItems:'center',gap:10}}>
+                              <span style={{width:54,fontSize:12,color:'#6B7280',fontWeight:600,flexShrink:0}}>{shortTk(d.name)}</span>
+                              <div style={{flex:1,height:14,background:'#F0EFE9',borderRadius:4,position:'relative',overflow:'hidden'}}>
+                                <div title={d.secteur} style={{width:Math.max((d.value/maxv*100),1.5)+'%',height:'100%',background:clr,borderRadius:4}}/>
+                              </div>
+                              <span style={{width:42,textAlign:'right',fontSize:12,fontWeight:700,flexShrink:0}}>{fmt(pct,1)}%</span>
+                            </div>
+                          );
+                        })}
                       </div>
-                    </div>
+                    )}
+                    <div style={{fontSize:10,color:'#D1D5DB',marginTop:10}}>Barres proportionnelles au poids relatif · couleur = secteur · % = part du total</div>
                   </div>
                 );
               })}
@@ -1452,9 +1576,48 @@ function App(){
               })}
               <div style={{...s.card,background:'#191919',color:'#fff'}}>
                 <div style={{fontSize:11,color:'#9CA3AF',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.05em'}}>Cash total</div>
-                <div style={{fontSize:22,fontWeight:800,color:totalCash<0?'#FCA5A5':'#fff'}}>{m(fmtEUR(totalCash))}</div>
-                <div style={{fontSize:11,color:'#9CA3AF',marginTop:4}}>{grandTotal>0?fmt(totalCash/grandTotal*100,1)+'% du total':'—'}</div>
+                <div style={{fontSize:22,fontWeight:800,color:totalCashAll<0?'#FCA5A5':'#fff'}}>{m(fmtEUR(totalCashAll))}</div>
+                <div style={{fontSize:11,color:'#9CA3AF',marginTop:4}}>{grandTotal>0?fmt(totalCashAll/grandTotal*100,1)+'% du total':'—'}{extCash!==0?` · dont livrets ${m(fmtEUR(extCash))}`:''}</div>
               </div>
+            </div>
+
+            {/* Cash externe (livrets) — solde édité à la volée, hors enveloppes */}
+            <div style={{...s.card,marginBottom:20}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:buckets.length||bucketAdding?12:0,flexWrap:'wrap',gap:8}}>
+                <div>
+                  <div style={{fontWeight:700,fontSize:15}}>Cash externe (livrets)</div>
+                  <div style={{fontSize:12,color:'#9CA3AF',marginTop:2}}>Solde modifié à la main, sans mouvements. Compte dans le cash total et l'allocation, mais pas dans les enveloppes PEA/CTO/PER.</div>
+                </div>
+                {!bucketAdding&&<button style={{...s.btn,background:'#F0EFE9',color:'#6B7280'}} onClick={()=>{setBucketAdding(true);setBucketEditId(null);}}>+ Ajouter une poche</button>}
+              </div>
+              {bucketAdding&&(
+                <div style={{padding:12,background:'#FAFAF8',border:'1px solid #EEEDE9',borderRadius:8,marginBottom:10}}>
+                  <BucketForm isNew onSave={addBucket} onCancel={()=>setBucketAdding(false)} s={s}/>
+                </div>
+              )}
+              {buckets.map(b=>(
+                <div key={b.id} style={{marginBottom:8}}>
+                  {bucketEditId===b.id?(
+                    <div style={{padding:12,background:'#FAFAF8',border:'1px solid #EEEDE9',borderRadius:8}}>
+                      <BucketForm init={b} onSave={updBucket} onCancel={()=>setBucketEditId(null)} s={s}/>
+                    </div>
+                  ):bucketDelId===b.id?(
+                    <div style={{padding:'10px 14px',background:'#FEF2F2',borderRadius:8}}>
+                      <span style={{color:'#DC2626'}}>Supprimer la poche « {b.name} » ?</span>
+                      <button style={{...s.btn,background:'#DC2626',color:'#fff',marginLeft:14,padding:'3px 12px',fontSize:12}} onClick={()=>delBucket(b.id)}>Confirmer</button>
+                      <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',marginLeft:6,padding:'3px 12px',fontSize:12}} onClick={()=>setBucketDelId(null)}>Annuler</button>
+                    </div>
+                  ):(
+                    <div style={{display:'flex',alignItems:'center',gap:12,padding:'8px 14px',background:'#FAFAF8',borderRadius:8}}>
+                      <Badge text={b.name} color={CASH_CLR}/>
+                      <span style={{fontWeight:700,fontSize:16,flex:1}}>{m(fmtEUR(num(b.montant)))}</span>
+                      <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 10px',fontSize:12}} onClick={()=>{setBucketEditId(b.id);setBucketAdding(false);}}>✏️</button>
+                      <button style={{...s.btn,background:'#FEE2E2',color:'#DC2626',padding:'3px 10px',fontSize:12}} onClick={()=>setBucketDelId(b.id)}>🗑️</button>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {buckets.length===0&&!bucketAdding&&<div style={{fontSize:12,color:'#D1D5DB'}}>Aucune poche externe — ajoutes-en une pour intégrer tes livrets au cash total.</div>}
             </div>
 
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12,flexWrap:'wrap',gap:8}}>
