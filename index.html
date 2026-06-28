@@ -62,6 +62,10 @@ const { useState, useEffect, Fragment } = React;
 const CATS    = ['Défensif','Quality Core','Quality Satellite','Outsider'];
 const ENVS    = ['PEA','CTO','PER'];
 const CAT_CLR = {'Défensif':'#0D9488','Quality Core':'#2563EB','Quality Satellite':'#7C3AED','Outsider':'#D97706','Liquidités':'#64748B'};
+// Taux exigé par catégorie = sans-risque (réf. US 10 ans, %) + prime de risque (pts).
+// Valeurs par défaut, surchargées par le panneau éditable (table app_settings, clé 'hurdles').
+const HURDLE_CATS = ['Défensif','Quality Core','Quality Satellite','Outsider'];
+const HURDLE_DEFAULT = { rf:4.37, premiums:{'Défensif':4,'Quality Core':5.5,'Quality Satellite':7,'Outsider':9} };
 const ENV_CLR = {PEA:'#059669',CTO:'#2563EB',PER:'#EA580C',Watchlist:'#9CA3AF'};
 // Enveloppe sentinelle : titre suivi mais pas encore acheté. VOLONTAIREMENT hors de ENVS
 // → exclu de held/exited, du cash, et de toutes les pondérations (enveloppe/catégorie/secteur/thème/IA).
@@ -245,6 +249,9 @@ const fmtAsym = a => a==null?'—':a===Infinity?'∞':fmt(a,1)+'×';
 const asymClr = a => a==null?'#9CA3AF':(a===Infinity||a>=3)?'#16A34A':a>=1?'#CA8A04':'#DC2626';
 // Format d'un rendement annualisé (entrée en décimal : 0,167 → « +16,7% »)
 const fmtPct = (x,d=1) => x==null?'—':((x>=0?'+':'')+fmt(x*100,d)+'%');
+// Excès vs taux exigé, exprimé en points (entrée décimale : 0,021 → « +2,1 pts »)
+const fmtPts = x => x==null?'—':((x>=0?'+':'')+fmt(x*100,1)+' pts');
+const excessClr = x => x==null?'#9CA3AF':x>=0?'#16A34A':'#DC2626';
 
 // Mois pleins (échus) écoulés depuis une date 'YYYY-MM-DD'
 function monthsElapsed(dateStr){
@@ -672,6 +679,27 @@ function WlDeepDive({l,mg}){
           {v.div>0&&<div style={{fontSize:10,color:'#D1D5DB',marginTop:4}}>Dividende inclus : +{fmt(v.div*100,1)}%/an</div>}
         </div>
       )}
+      {mg.hurdle!=null&&mg.erBasis!=null&&(
+        <div style={{...card,minWidth:240}}>
+          <Lbl>Taux exigé · {l.cat}</Lbl>
+          <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13}}>
+            <span style={{color:'#6B7280'}}>Sans-risque <span style={{color:'#9CA3AF',fontSize:11}}>(réf. US)</span></span><span>{fmt(mg.rfUsed,2)}%</span>
+          </div>
+          <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13}}>
+            <span style={{color:'#6B7280'}}>Prime {l.cat}</span><span>+{fmt(mg.premUsed,1)} pts</span>
+          </div>
+          <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13,borderTop:'1px solid #F0EFE9',marginTop:2,paddingTop:5}}>
+            <span style={{color:'#6B7280',fontWeight:600}}>= Taux exigé</span><strong>{fmt(mg.hurdle*100,1)}%</strong>
+          </div>
+          <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13}}>
+            <span style={{color:'#6B7280'}}>Rendement retenu</span><strong style={{color:erClr(mg.erBasis)}}>{fmtPct(mg.erBasis)}/an</strong>
+          </div>
+          <div style={{display:'flex',justifyContent:'space-between',padding:'6px 0 0',marginTop:4,borderTop:'1px solid #F0EFE9',fontSize:13}}>
+            <span style={{color:'#6B7280',fontWeight:600}}>Excès {mg.excess>=0?'✓':''}</span><strong style={{fontSize:15,color:excessClr(mg.excess)}}>{fmtPts(mg.excess)}</strong>
+          </div>
+          <div style={{fontSize:10,color:'#D1D5DB',marginTop:6,lineHeight:1.5}}>Rendement retenu = Pabrai si dispo, sinon Rochon. ✓ = franchit sa barre de catégorie.</div>
+        </div>
+      )}
       {v.hasP&&(
         <div style={{...card,minWidth:300}}>
           <Lbl>Scénarios Pabrai · prix à {v.H} ans</Lbl>
@@ -749,8 +777,11 @@ function App(){
   const [bucketEditId,setBucketEditId]=useState(null);
   const [bucketDelId, setBucketDelId] =useState(null);
   const [editorTab,setEditorTab]=useState('portfolio'); // sous-onglet éditeur : portfolio / watchlist / sortis
-  const [wlSort,    setWlSort]   = useState('marge');   // tri watchlist : marge cible / rdt Pabrai / rdt Rochon / asymétrie
+  const [wlSort,    setWlSort]   = useState('marge');   // tri watchlist : marge cible / rdt Pabrai / rdt Rochon / asymétrie / excès
   const [wlExp,     setWlExp]    = useState(new Set()); // lignes watchlist dépliées (deep dive valorisation)
+  const [hurdleCfg, setHurdleCfg]= useState(HURDLE_DEFAULT); // taux exigés (sans-risque + primes par catégorie)
+  const [hurdlePanel,setHurdlePanel]=useState(false);   // panneau d'édition des taux exigés ouvert ?
+  const [hurdleDraft,setHurdleDraft]=useState(null);    // brouillon en cours d'édition
   // ── État module Risque ──
   const [riskBusy,  setRiskBusy]  = useState(false);
   const [riskErr,   setRiskErr]   = useState(null);
@@ -896,6 +927,11 @@ function App(){
     setSnapshots(snapData||[]);
     const {data:bucketData}=await db.from('cash_buckets').select('*').order('id');
     setBuckets(bucketData||[]);
+    // Taux exigés (table app_settings, clé 'hurdles') — silencieux si la table n'existe pas encore
+    const {data:hurdleData}=await db.from('app_settings').select('value').eq('key','hurdles').maybeSingle();
+    if(hurdleData?.value){
+      setHurdleCfg({rf:hurdleData.value.rf??HURDLE_DEFAULT.rf, premiums:{...HURDLE_DEFAULT.premiums,...(hurdleData.value.premiums||{})}});
+    }
     await doFetch(positions,watchlist);
     setLoading(false);
   }
@@ -1131,6 +1167,13 @@ function App(){
   }
   async function delBucket(id){await db.from('cash_buckets').delete().eq('id',id);setBuckets(buckets.filter(x=>x.id!==id));setBucketDelId(null);}
 
+  // Taux exigés : upsert sur la clé texte 'hurdles' (pas d'id → pas de piège identity-column)
+  async function saveHurdles(cfg){
+    setHurdleCfg(cfg);
+    const {error}=await db.from('app_settings').upsert({key:'hurdles',value:cfg,updated_at:new Date().toISOString()},{onConflict:'key'}).select();
+    if(error)setError('Sauvegarde taux exigés : '+error.message);
+  }
+
   // Toggle d'une cible (pc1_on/pc2_on/pc3_on) sur la bonne table
   async function setPcFlag(line,key,val){
     if(line.wlType==='watch'){
@@ -1296,7 +1339,13 @@ function App(){
     const pct52=(px!=null&&h52!=null&&l52!=null&&h52>l52)?Math.max(0,Math.min(100,((px-l52)/(h52-l52))*100)):null;
     const ma200=pr.ma200, ma200pct=(px!=null&&ma200>0)?((px-ma200)/ma200)*100:null;  // momentum : écart à la MM200
     const valo=valoMetrics(l,px);                                                       // rendement espéré + asymétrie (live)
-    return {cours:px,cur:pr.c||'',pc2,pc3,mos1:mk(l.pc1),mos2:mk(pc2),mos3:mk(pc3),h52,l52,pct52,ma200,ma200pct,valo};
+    // Taux exigé = sans-risque (réf. US) + prime de la catégorie ; excès vs rendement espéré (base Pabrai, sinon Rochon)
+    const prem=hurdleCfg?.premiums?.[l.cat];
+    const rfUsed=num(hurdleCfg?.rf), premUsed=(prem!=null?num(prem):null);
+    const hurdle=(premUsed!=null)?(rfUsed+premUsed)/100:null;                            // décimal
+    const erBasis=(valo.erP!=null)?valo.erP:(valo.erR!=null?valo.erR:null);
+    const excess=(hurdle!=null&&erBasis!=null)?erBasis-hurdle:null;
+    return {cours:px,cur:pr.c||'',pc2,pc3,mos1:mk(l.pc1),mos2:mk(pc2),mos3:mk(pc3),h52,l52,pct52,ma200,ma200pct,valo,hurdle,excess,erBasis,rfUsed,premUsed};
   };
   const allTargetsOff = l => !(l.pc1_on!==false||l.pc2_on!==false||l.pc3_on!==false);
   // Pré-calcul (cours, marges, momentum, valo) une seule fois par ligne, réutilisé au tri et au rendu
@@ -1305,6 +1354,7 @@ function App(){
     if(wlSort==='pabrai') return mg.valo.erP;
     if(wlSort==='rochon') return mg.valo.erR;
     if(wlSort==='asym')   return mg.valo.asym===Infinity?1e9:mg.valo.asym;
+    if(wlSort==='excess') return mg.excess;
     const m=[null,mg.mos1,mg.mos2,mg.mos3][targetIdx(l)];   // 'marge' : marge vers la cible active
     return m;
   };
@@ -1507,11 +1557,39 @@ function App(){
             {/* Sélecteur de tri / lentille de classement */}
             <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:14,flexWrap:'wrap'}}>
               <span style={{fontSize:11,color:'#9CA3AF',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.05em'}}>Trier par</span>
-              {[{id:'marge',l:'Marge vs cible'},{id:'pabrai',l:'Rdt espéré · Pabrai'},{id:'rochon',l:'Rdt espéré · Rochon'},{id:'asym',l:'Asymétrie'}].map(({id,l})=>(
+              {[{id:'marge',l:'Marge vs cible'},{id:'pabrai',l:'Rdt espéré · Pabrai'},{id:'rochon',l:'Rdt espéré · Rochon'},{id:'asym',l:'Asymétrie'},{id:'excess',l:'Excès vs exigé'}].map(({id,l})=>(
                 <button key={id} onClick={()=>setWlSort(id)}
                   style={{...s.btn,background:wlSort===id?'#191919':'#F0EFE9',color:wlSort===id?'#fff':'#6B7280',padding:'4px 12px',fontSize:12}}>{l}</button>
               ))}
+              <button onClick={()=>{setHurdleDraft({rf:hurdleCfg.rf,premiums:{...hurdleCfg.premiums}});setHurdlePanel(p=>!p);}}
+                style={{...s.btn,background:hurdlePanel?'#191919':'#F0EFE9',color:hurdlePanel?'#fff':'#6B7280',padding:'4px 12px',fontSize:12}} title="Régler les taux exigés par catégorie">⚙ Taux exigés</button>
             </div>
+
+            {/* Panneau d'édition des taux exigés */}
+            {hurdlePanel&&hurdleDraft&&(
+              <div style={{marginBottom:14,padding:'14px 16px',background:'#FAFAF8',border:'1px solid #EEEDE9',borderRadius:10}}>
+                <div style={{fontSize:12,color:'#6B7280',marginBottom:10,lineHeight:1.5}}>
+                  <strong>Taux exigé = sans-risque + prime de catégorie.</strong> Le classement « Excès vs exigé » trie sur <em>rendement espéré − taux exigé</em>. Une défensive peu rémunératrice peut ainsi battre une satellite plus généreuse si elle dépasse mieux sa propre barre.
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:12,alignItems:'end'}}>
+                  <div>
+                    <label style={s.lbl}>Sans-risque (réf. US 10 ans) %</label>
+                    <input style={s.inp} type="number" step="any" value={hurdleDraft.rf??''} onChange={e=>setHurdleDraft(d=>({...d,rf:e.target.value===''?'':parseFloat(e.target.value)}))}/>
+                  </div>
+                  {HURDLE_CATS.map(cat=>(
+                    <div key={cat}>
+                      <label style={{...s.lbl,color:CAT_CLR[cat]}}>Prime {cat} (pts)</label>
+                      <input style={s.inp} type="number" step="any" value={hurdleDraft.premiums?.[cat]??''} onChange={e=>setHurdleDraft(d=>({...d,premiums:{...d.premiums,[cat]:e.target.value===''?'':parseFloat(e.target.value)}}))}/>
+                      <div style={{fontSize:10,color:'#9CA3AF',marginTop:3}}>exigé ≈ {(()=>{const r=parseFloat(hurdleDraft.rf),p=parseFloat(hurdleDraft.premiums?.[cat]);return (isNaN(r)||isNaN(p))?'—':fmt(r+p,1)+'%';})()}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{display:'flex',gap:8,marginTop:14}}>
+                  <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>{const c={rf:num(hurdleDraft.rf),premiums:Object.fromEntries(HURDLE_CATS.map(k=>[k,num(hurdleDraft.premiums?.[k])]))};saveHurdles(c);setHurdlePanel(false);}}>✓ Enregistrer</button>
+                  <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280'}} onClick={()=>setHurdlePanel(false)}>Annuler</button>
+                </div>
+              </div>
+            )}
 
             <div style={{overflowX:'auto',borderRadius:12,border:'1px solid #EEEDE9',background:'#FFFFFF'}}>
               <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
@@ -1597,6 +1675,7 @@ function App(){
                             <div style={{lineHeight:1.3}}>
                               {v.erP!=null&&<div style={{fontWeight:700,color:erClr(v.erP),whiteSpace:'nowrap'}} title="Pabrai — espérance VE, total annualisé">P {fmtPct(v.erP)}<span style={{fontWeight:400,color:'#9CA3AF',fontSize:10}}>/an</span></div>}
                               {v.erR!=null&&<div style={{fontSize:11,color:'#9CA3AF',whiteSpace:'nowrap'}} title="Rochon — central, total annualisé">R {fmtPct(v.erR)}/an</div>}
+                              {mg.excess!=null&&<div style={{fontSize:11,fontWeight:700,color:excessClr(mg.excess),whiteSpace:'nowrap',marginTop:1}} title={'Excès vs taux exigé ('+l.cat+' : '+fmt(mg.rfUsed+mg.premUsed,1)+'%)'}>Δ {fmtPts(mg.excess)}</div>}
                             </div>
                           )}
                         </td>
@@ -1629,7 +1708,7 @@ function App(){
                 </tbody>
               </table>
             </div>
-            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>▸ Cliquez sur le chevron pour le détail valorisation (scénarios, rendement espéré, asymétrie) · ☑ cible active · MM200 = écart à la moyenne mobile 200 j (↑ au-dessus / ↓ en-dessous) · Rdt espéré : P = Pabrai (espérance pondérée), R = Rochon (central), recalculés au cours · 🟢 cible atteinte · 🟡 approche · 🔴 au-delà</div>
+            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>▸ Chevron = détail valorisation · ☑ cible active · MM200 = écart à la moyenne mobile 200 j · Rdt espéré : P = Pabrai, R = Rochon, Δ = excès vs taux exigé de la catégorie · tri « Excès vs exigé » classe par Δ · ⚙ pour régler les taux · 🟢 cible atteinte · 🟡 approche · 🔴 au-delà</div>
           </div>
         )}
 
