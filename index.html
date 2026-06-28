@@ -173,6 +173,7 @@ function PerfDot({tri,holdM,result,masked}){
 
 const CASH_TYPES = ['apport','retrait','dividende']; // apport/dividende = +cash, retrait = −cash
 const FX_TICKERS = ['EURUSD=X','EURCAD=X','EURDKK=X'];
+const RF_TICKER  = '^TNX';  // CBOE US 10 ans — coté en dixièmes (43,72 = 4,372 %)
 
 // Seed — catégories migrées vers le nouveau schéma. Mouvements vides : à renseigner via l'éditeur.
 const SEED = [
@@ -782,6 +783,7 @@ function App(){
   const [hurdleCfg, setHurdleCfg]= useState(HURDLE_DEFAULT); // taux exigés (sans-risque + primes par catégorie)
   const [hurdlePanel,setHurdlePanel]=useState(false);   // panneau d'édition des taux exigés ouvert ?
   const [hurdleDraft,setHurdleDraft]=useState(null);    // brouillon en cours d'édition
+  const [rfLive,    setRfLive]   = useState(null);      // sans-risque US 10 ans live (^TNX/10), affiché dans le panneau
   // ── État module Risque ──
   const [riskBusy,  setRiskBusy]  = useState(false);
   const [riskErr,   setRiskErr]   = useState(null);
@@ -943,11 +945,13 @@ function App(){
       ...positions.map(x=>x.ticker),
       ...watchlist.map(x=>x.ticker),
       ...FX_TICKERS,
+      RF_TICKER,
     ])];
     try{
       const px=await fetchAllPrices(allTickers);
       const newFX={};
       FX_TICKERS.forEach(t=>{if(px[t]){newFX[t]=px[t].p;delete px[t];}});
+      if(px[RF_TICKER]){setRfLive(px[RF_TICKER].p/10);delete px[RF_TICKER];}  // ^TNX coté en dixièmes
       setFX(newFX);setPrices(px);setLastUpd(new Date());
     }catch(e){setError('Erreur : '+e.message);}
     setFetching(false);
@@ -1575,6 +1579,17 @@ function App(){
                   <div>
                     <label style={s.lbl}>Sans-risque (réf. US 10 ans) %</label>
                     <input style={s.inp} type="number" step="any" value={hurdleDraft.rf??''} onChange={e=>setHurdleDraft(d=>({...d,rf:e.target.value===''?'':parseFloat(e.target.value)}))}/>
+                    <div style={{fontSize:10,marginTop:3,display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                      {rfLive!=null?(
+                        <>
+                          <span style={{color:'#9CA3AF'}}>10 ans US live : <strong style={{color:'#6B7280'}}>{fmt(rfLive,2)}%</strong></span>
+                          {Math.abs((parseFloat(hurdleDraft.rf)||0)-rfLive)>=0.005&&(
+                            <button onClick={()=>setHurdleDraft(d=>({...d,rf:Math.round(rfLive*100)/100}))}
+                              style={{...s.btn,background:'#EAF2EF',color:'#0D9488',padding:'2px 8px',fontSize:10}}>utiliser</button>
+                          )}
+                        </>
+                      ):<span style={{color:'#D1D5DB'}}>10 ans US live : indisponible</span>}
+                    </div>
                   </div>
                   {HURDLE_CATS.map(cat=>(
                     <div key={cat}>
