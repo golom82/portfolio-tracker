@@ -204,6 +204,44 @@ const fmtQte1 = n => n==null?'—':Number(n).toLocaleString('fr-FR',{maximumFrac
 // Couleur marge : vert si cible atteinte/dépassée (≥0), jaune en zone d'approche (−5..0), rouge au-delà
 const mosClr = n => n==null?'#9CA3AF':n>=0?'#16A34A':n>=-5?'#D97706':'#DC2626';
 
+// ── Module VALORISATION (watchlist) — rendement espéré & asymétrie ──────────
+// Paramètres FIGÉS, saisis après chaque valo (en DEVISE LOCALE du titre, comme PC1/cours) ;
+// le SEUL élément live est le cours → tout se recalcule à chaque actualisation, comme les marges PC.
+//  • Rochon : valeur centrale projetée À L'HORIZON (VI à N ans, NON actualisée) → CAGR vs cours.
+//  • Pabrai : 3 prix de scénario à l'horizon + probas → VE = Σ(proba·prix) → CAGR vs cours ;
+//             asymétrie = hausse (vers Bull) / baisse (vers Bear) AU COURS ACTUEL (reproduit le rapport).
+//  Rendement « total » = CAGR capital + rendement du dividende (ajouté à plat, comme dans la valo).
+function valoMetrics(l, cours){
+  const H=num(l.horizon), div=num(l.div_yield)/100;
+  const bear=num(l.pabrai_bear), base=num(l.pabrai_base), bull=num(l.pabrai_bull), roch=num(l.rochon_central);
+  const hasP = bear>0&&base>0&&bull>0&&H>0;      // Pabrai complet
+  const hasR = roch>0&&H>0;                       // Rochon central
+  let pB=num(l.prob_bear), pU=num(l.prob_bull);
+  if(!(pB>0)&&!(pU>0)){pB=25;pU=25;}             // défaut 25/50/25 si probas non saisies
+  const pBase=Math.max(0,100-pB-pU);
+  const ve = hasP ? (bear*pB+base*pBase+bull*pU)/100 : null;   // valeur espérée à l'horizon
+  const cagr = t => (cours>0&&t>0&&H>0) ? Math.pow(t/cours,1/H)-1 : null;
+  const erP = (ve!=null&&cagr(ve)!=null) ? cagr(ve)+div : null;   // rendement espéré total — Pabrai
+  const erR = (hasR&&cagr(roch)!=null)   ? cagr(roch)+div : null; // rendement espéré total — Rochon
+  let up=null,down=null,asym=null;
+  if(hasP&&cours>0){
+    up=(bull-cours)/cours; down=(cours-bear)/cours;
+    asym = down>0.0005 ? up/down : (up>0?Infinity:null);
+  }
+  const scen = hasP ? [
+    {k:'Bear',px:bear,p:pB,  r:cagr(bear)},
+    {k:'Base',px:base,p:pBase,r:cagr(base)},
+    {k:'Bull',px:bull,p:pU,  r:cagr(bull)},
+  ] : null;
+  return {H,div,hasP,hasR,ve,erP,erR,up,down,asym,scen,roch,pBear:pB,pBull:pU,pBase};
+}
+// Couleur du rendement espéré (annualisé) — calée sur les seuils quality (Rochon ≥ 15 %, etc.)
+const erClr = n => n==null?'#9CA3AF':n>=0.15?'#16A34A':n>=0.10?'#CA8A04':n>=0?'#D97706':'#DC2626';
+// Format compact d'un ratio d'asymétrie
+const fmtAsym = a => a==null?'—':(a===Infinity||a>99)?'>99×':fmt(a,1)+'×';
+// Format d'un rendement annualisé (entrée en décimal : 0,167 → « +16,7% »)
+const fmtPct = (x,d=1) => x==null?'—':((x>=0?'+':'')+fmt(x*100,d)+'%');
+
 // Mois pleins (échus) écoulés depuis une date 'YYYY-MM-DD'
 function monthsElapsed(dateStr){
   if(!dateStr) return null;
@@ -430,13 +468,41 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
         </div>
       </div>
       <MovementsEditor value={f.mouvements} onChange={v=>upd('mouvements',v)} s={s}/>
+
+      {/* ── Valorisation (rendement espéré & asymétrie, watchlist) — facultatif ── */}
+      <div style={{marginTop:14,padding:'12px 14px',background:'#FAFAF8',border:'1px solid #EEEDE9',borderRadius:8}}>
+        <div style={{fontSize:11,color:'#9CA3AF',marginBottom:2,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.05em'}}>Valorisation — rendement espéré & asymétrie <span style={{textTransform:'none',fontWeight:400}}>(facultatif)</span></div>
+        <div style={{fontSize:11,color:'#9CA3AF',marginBottom:10,lineHeight:1.5}}>Valeurs <strong>à l'horizon</strong>, en <strong>devise locale</strong> du titre (recopie du rapport de valo). Le cours étant live, rendement espéré et asymétrie se recalculent seuls. Laisse vide pour ne rien afficher.</div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(130px,1fr))',gap:12}}>
+          {[
+            {k:'horizon',l:'Horizon (ans)'},{k:'div_yield',l:'Dividende %/an'},
+            {k:'rochon_central',l:'Rochon central (horizon)'},
+            {k:'pabrai_bear',l:'Pabrai Bear'},{k:'pabrai_base',l:'Pabrai Base'},{k:'pabrai_bull',l:'Pabrai Bull'},
+            {k:'prob_bear',l:'Proba Bear %'},{k:'prob_bull',l:'Proba Bull %'},
+          ].map(({k,l})=>(
+            <div key={k}><label style={s.lbl}>{l}</label>
+              <input style={s.inp} type="number" step="any" value={f[k]??''} onChange={e=>upd(k,e.target.value===''?'':parseFloat(e.target.value))}/>
+            </div>
+          ))}
+        </div>
+        <div style={{fontSize:11,color:'#9CA3AF',marginTop:8}}>
+          Proba Base déduite : <strong style={{color:'#6B7280'}}>{(()=>{const b=parseFloat(f.prob_bear),u=parseFloat(f.prob_bull);const bb=isNaN(b)?0:b,uu=isNaN(u)?0:u;return (isNaN(b)&&isNaN(u))?'25 / 50 / 25 (défaut)':Math.max(0,100-bb-uu)+'%';})()}</strong>
+          {(()=>{const bear=parseFloat(f.pabrai_bear),base=parseFloat(f.pabrai_base),bull=parseFloat(f.pabrai_bull);if([bear,base,bull].some(isNaN))return null;let pB=parseFloat(f.prob_bear),pU=parseFloat(f.prob_bull);if(isNaN(pB)&&isNaN(pU)){pB=25;pU=25;}else{pB=isNaN(pB)?0:pB;pU=isNaN(pU)?0:pU;}const pBase=Math.max(0,100-pB-pU);const ve=(bear*pB+base*pBase+bull*pU)/100;return <span> · VE ≈ <strong style={{color:'#6B7280'}}>{fmt(ve)}</strong></span>;})()}
+        </div>
+      </div>
+
       <div style={{display:'flex',gap:16,marginTop:10,fontSize:11,color:'#9CA3AF'}}>
         <span>Premier achat : <strong style={{color:'#6B7280'}}>{fmtDate(firstBuy)}</strong></span>
         <span>Dernier mouvement : <strong style={{color:'#6B7280'}}>{fmtDate(lastMove)}</strong></span>
       </div>
       <div style={{display:'flex',gap:8,marginTop:14}}>
         <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>{
-          const clean={...f,secteur:f.secteur||null,themes:Array.isArray(f.themes)?f.themes:[],mouvements:(f.mouvements||[]).map(mvt=>({date:mvt.date,type:mvt.type==='vente'?'vente':'achat',qte:num(mvt.qte),montant:num(mvt.montant)}))};
+          const vnum=x=>(x===''||x==null||isNaN(parseFloat(x)))?null:parseFloat(x);
+          const clean={...f,secteur:f.secteur||null,themes:Array.isArray(f.themes)?f.themes:[],
+            horizon:vnum(f.horizon),div_yield:vnum(f.div_yield),rochon_central:vnum(f.rochon_central),
+            pabrai_bear:vnum(f.pabrai_bear),pabrai_base:vnum(f.pabrai_base),pabrai_bull:vnum(f.pabrai_bull),
+            prob_bear:vnum(f.prob_bear),prob_bull:vnum(f.prob_bull),
+            mouvements:(f.mouvements||[]).map(mvt=>({date:mvt.date,type:mvt.type==='vente'?'vente':'achat',qte:num(mvt.qte),montant:num(mvt.montant)}))};
           onSave(clean);
         }}>{isNew?'+ Ajouter':'✓ Sauvegarder'}</button>
         <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280'}} onClick={onCancel}>Annuler</button>
@@ -558,6 +624,94 @@ function TitleStats({c,mask}){
   );
 }
 
+// ── Détail valorisation d'une ligne de watchlist (deep dive dépliable) ──
+// Toutes les valeurs sont en devise locale du titre ; recalculées au cours courant.
+function WlDeepDive({l,mg}){
+  const v=mg.valo, cur=mg.cur;
+  const px=n=>n==null?'—':fmt(n)+(cur?' '+cur:'');
+  const hasAny=(l.pc1>0)||v.hasP||v.hasR;
+  if(!hasAny) return (
+    <div style={{fontSize:12,color:'#9CA3AF',lineHeight:1.6}}>
+      Aucun paramètre de valorisation renseigné. Ajoute PC1 / MoS et — pour le rendement espéré et l'asymétrie — le central Rochon et les scénarios Pabrai dans l'Éditeur (section « Valorisation »).
+    </div>
+  );
+  const Lbl=({children})=><div style={{fontSize:10,color:'#9CA3AF',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>{children}</div>;
+  const card={background:'#FFFFFF',border:'1px solid #EEEDE9',borderRadius:8,padding:'12px 14px'};
+  const scenClr={Bear:'#DC2626',Base:'#6B7280',Bull:'#16A34A'};
+  const asymClr=a=>a==null?'#9CA3AF':(a===Infinity||a>=3?'#16A34A':a>=1?'#CA8A04':'#DC2626');
+  return (
+    <div style={{display:'flex',flexWrap:'wrap',gap:14}}>
+      {l.pc1>0&&(
+        <div style={{...card,minWidth:240}}>
+          <Lbl>Cibles d'entrée · MoS requise {l.mos}%</Lbl>
+          {[['PC1 — Initiation',l.pc1,mg.mos1],['PC2 — Accumulation',mg.pc2,mg.mos2],['PC3 — Conviction',mg.pc3,mg.mos3]].map(([lab,p,mos])=>(
+            <div key={lab} style={{display:'flex',justifyContent:'space-between',gap:16,padding:'3px 0',fontSize:13}}>
+              <span style={{color:'#6B7280'}}>{lab}</span>
+              <span><strong>{px(p)}</strong> <span style={{color:mosClr(mos),fontWeight:700,marginLeft:6}}>{mos==null?'':(mos>=0?'+':'')+fmt(mos)+'%'}</span></span>
+            </div>
+          ))}
+        </div>
+      )}
+      {(v.hasP||v.hasR)&&(
+        <div style={{...card,minWidth:240}}>
+          <Lbl>Rendement espéré · horizon {v.H} ans</Lbl>
+          {v.hasR&&<div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13}}>
+            <span style={{color:'#6B7280'}}>Rochon central <span style={{color:'#9CA3AF',fontSize:11}}>({px(v.roch)})</span></span>
+            <strong style={{color:erClr(v.erR)}}>{fmtPct(v.erR)}/an</strong>
+          </div>}
+          {v.hasP&&<div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13}}>
+            <span style={{color:'#6B7280'}}>Pabrai VE <span style={{color:'#9CA3AF',fontSize:11}}>({px(v.ve)})</span></span>
+            <strong style={{color:erClr(v.erP)}}>{fmtPct(v.erP)}/an</strong>
+          </div>}
+          {v.hasP&&v.hasR&&<div style={{fontSize:11,color:'#9CA3AF',marginTop:6,paddingTop:6,borderTop:'1px solid #F0EFE9',lineHeight:1.5}}>
+            Écart Pabrai − Rochon : <strong style={{color:'#6B7280'}}>{fmtPct(v.erP-v.erR)}</strong>. Resserré = méthodes d'accord ; large = espérance sensible aux hypothèses.
+          </div>}
+          {v.div>0&&<div style={{fontSize:10,color:'#D1D5DB',marginTop:4}}>Dividende inclus : +{fmt(v.div*100,1)}%/an</div>}
+        </div>
+      )}
+      {v.hasP&&(
+        <div style={{...card,minWidth:300}}>
+          <Lbl>Scénarios Pabrai · prix à {v.H} ans</Lbl>
+          <table style={{borderCollapse:'collapse',fontSize:12,width:'100%'}}>
+            <thead><tr>
+              <th style={{textAlign:'left',color:'#9CA3AF',fontWeight:600,padding:'2px 8px 4px 0'}}>Scénario</th>
+              <th style={{textAlign:'right',color:'#9CA3AF',fontWeight:600,padding:'2px 8px 4px'}}>Prix</th>
+              <th style={{textAlign:'right',color:'#9CA3AF',fontWeight:600,padding:'2px 8px 4px'}}>Proba</th>
+              <th style={{textAlign:'right',color:'#9CA3AF',fontWeight:600,padding:'2px 0 4px 8px'}}>Rdt/an</th>
+            </tr></thead>
+            <tbody>
+              {v.scen.map(sc=>(
+                <tr key={sc.k}>
+                  <td style={{padding:'3px 8px 3px 0',color:scenClr[sc.k],fontWeight:700}}>{sc.k}</td>
+                  <td style={{padding:'3px 8px',textAlign:'right'}}>{px(sc.px)}</td>
+                  <td style={{padding:'3px 8px',textAlign:'right',color:'#6B7280'}}>{fmt(sc.p,0)}%</td>
+                  <td style={{padding:'3px 0 3px 8px',textAlign:'right',fontWeight:600,color:erClr(sc.r)}}>{fmtPct(sc.r)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{fontSize:10,color:'#D1D5DB',marginTop:6}}>VE = Σ(proba × prix) = {px(v.ve)} · proba Base déduite (100 − Bear − Bull)</div>
+        </div>
+      )}
+      {v.hasP&&(
+        <div style={{...card,minWidth:230}}>
+          <Lbl>Asymétrie (au cours actuel)</Lbl>
+          <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13}}>
+            <span style={{color:'#6B7280'}}>Hausse → Bull</span><strong style={{color:'#16A34A'}}>{fmtPct(v.up)}</strong>
+          </div>
+          <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13}}>
+            <span style={{color:'#6B7280'}}>Baisse → Bear</span><strong style={{color:v.down>0?'#DC2626':'#16A34A'}}>{v.down==null?'—':(v.down>0?'−':'+')+fmt(Math.abs(v.down)*100,1)+'%'}</strong>
+          </div>
+          <div style={{display:'flex',justifyContent:'space-between',padding:'6px 0 0',marginTop:4,borderTop:'1px solid #F0EFE9',fontSize:13}}>
+            <span style={{color:'#6B7280',fontWeight:600}}>Ratio hausse / baisse</span><strong style={{fontSize:15,color:asymClr(v.asym)}}>{fmtAsym(v.asym)}</strong>
+          </div>
+          <div style={{fontSize:10,color:'#D1D5DB',marginTop:6,lineHeight:1.5}}>Asymétrie de fin d'horizon (Bull/Bear vs cours), pas un max-drawdown. Très sensible à l'hypothèse Bear.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function App(){
   const [pos,       setPos]       = useState([]);
   const [wl,        setWl]        = useState([]);
@@ -590,6 +744,8 @@ function App(){
   const [bucketEditId,setBucketEditId]=useState(null);
   const [bucketDelId, setBucketDelId] =useState(null);
   const [editorTab,setEditorTab]=useState('portfolio'); // sous-onglet éditeur : portfolio / watchlist / sortis
+  const [wlSort,    setWlSort]   = useState('marge');   // tri watchlist : marge cible / rdt Pabrai / rdt Rochon / asymétrie
+  const [wlExp,     setWlExp]    = useState(new Set()); // lignes watchlist dépliées (deep dive valorisation)
   // ── État module Risque ──
   const [riskBusy,  setRiskBusy]  = useState(false);
   const [riskErr,   setRiskErr]   = useState(null);
@@ -763,7 +919,7 @@ function App(){
       try{
         const r=await fetch(`/api/prices?symbols=${encodeURIComponent(syms)}`);
         const d=await r.json();
-        (d.quoteResponse?.result||[]).forEach(q=>{px[q.symbol]={p:q.regularMarketPrice,c:q.currency,h52:q.fiftyTwoWeekHigh,l52:q.fiftyTwoWeekLow};});
+        (d.quoteResponse?.result||[]).forEach(q=>{px[q.symbol]={p:q.regularMarketPrice,c:q.currency,h52:q.fiftyTwoWeekHigh,l52:q.fiftyTwoWeekLow,ma200:q.twoHundredDayAverage,ma50:q.fiftyDayAverage};});
       }catch{}
     }
     return px;
@@ -1133,16 +1289,30 @@ function App(){
     const mk=pc=>px&&pc?((pc-px)/pc)*100:null;
     const h52=pr.h52, l52=pr.l52;
     const pct52=(px!=null&&h52!=null&&l52!=null&&h52>l52)?Math.max(0,Math.min(100,((px-l52)/(h52-l52))*100)):null;
-    return {cours:px,cur:pr.c||'',pc2,pc3,mos1:mk(l.pc1),mos2:mk(pc2),mos3:mk(pc3),h52,l52,pct52};
+    const ma200=pr.ma200, ma200pct=(px!=null&&ma200>0)?((px-ma200)/ma200)*100:null;  // momentum : écart à la MM200
+    const valo=valoMetrics(l,px);                                                       // rendement espéré + asymétrie (live)
+    return {cours:px,cur:pr.c||'',pc2,pc3,mos1:mk(l.pc1),mos2:mk(pc2),mos3:mk(pc3),h52,l52,pct52,ma200,ma200pct,valo};
   };
   const allTargetsOff = l => !(l.pc1_on!==false||l.pc2_on!==false||l.pc3_on!==false);
-  wlMerged.sort((a,b)=>{
-    const aOff=allTargetsOff(a), bOff=allTargetsOff(b);
-    if(aOff!==bOff) return aOff?1:-1;            // titre sans aucune cible active → en bas de liste
-    const ma=lineMargins(a), mb=lineMargins(b);
-    const va=[null,ma.mos1,ma.mos2,ma.mos3][targetIdx(a)];
-    const vb=[null,mb.mos1,mb.mos2,mb.mos3][targetIdx(b)];
-    return (vb==null?-999:vb)-(va==null?-999:va);
+  // Pré-calcul (cours, marges, momentum, valo) une seule fois par ligne, réutilisé au tri et au rendu
+  const wlRows = wlMerged.map(l=>({l,mg:lineMargins(l)}));
+  const sortVal = (l,mg)=>{
+    if(wlSort==='pabrai') return mg.valo.erP;
+    if(wlSort==='rochon') return mg.valo.erR;
+    if(wlSort==='asym')   return mg.valo.asym===Infinity?1e9:mg.valo.asym;
+    const m=[null,mg.mos1,mg.mos2,mg.mos3][targetIdx(l)];   // 'marge' : marge vers la cible active
+    return m;
+  };
+  wlRows.sort((A,B)=>{
+    if(wlSort==='marge'){
+      const aOff=allTargetsOff(A.l), bOff=allTargetsOff(B.l);
+      if(aOff!==bOff) return aOff?1:-1;          // sans cible active → en bas
+    }
+    const va=sortVal(A.l,A.mg), vb=sortVal(B.l,B.mg);
+    const na=(va==null||isNaN(va)), nb=(vb==null||isNaN(vb));
+    if(na!==nb) return na?1:-1;                  // valeurs manquantes → en bas
+    if(na&&nb) return 0;
+    return vb-va;                                // décroissant
   });
 
   return(
@@ -1169,7 +1339,7 @@ function App(){
 
       {/* Summary */}
       <div style={{display:'flex',gap:10,padding:'12px 24px',background:'#FFFFFF',borderBottom:'1px solid #EEEDE9',overflowX:'auto'}}>
-        {[{l:'Positions',v:held.length},{l:'PEA',v:held.filter(p=>p.env==='PEA').length+' pos.'},{l:'CTO',v:held.filter(p=>p.env==='CTO').length+' pos.'},{l:'PER',v:held.filter(p=>p.env==='PER').length+' pos.'},
+        {[{l:'Positions',v:new Set(held.map(p=>p.ticker)).size},{l:'PEA',v:held.filter(p=>p.env==='PEA').length+' pos.'},{l:'CTO',v:held.filter(p=>p.env==='CTO').length+' pos.'},{l:'PER',v:held.filter(p=>p.env==='PER').length+' pos.'},
           {l:'Titres (€)',v:totalValEUR>0?m(fmtEUR(totalValEUR)):'—'},
           {l:'Liquidités (€)',v:totalCashAll!==0?m(fmtEUR(totalCashAll)):'—',clr:totalCashAll<0?'#DC2626':null},
           {l:'Total titres+cash (€)',v:grandTotal!==0?m(fmtEUR(grandTotal)):'—',dot:true}]
@@ -1319,43 +1489,59 @@ function App(){
         {/* ── WATCHLIST ── */}
         {tab==='watchlist'&&(
           <div>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12,flexWrap:'wrap',gap:10}}>
               <div>
                 <div style={{fontWeight:700,fontSize:16}}>Watchlist</div>
-                <div style={{fontSize:12,color:'#9CA3AF',marginTop:2}}>Triée par marge vers la cible active la plus haute — décochez PC1/PC2 pour viser un point d'entrée plus bas</div>
+                <div style={{fontSize:12,color:'#9CA3AF',marginTop:2}}>Classe les titres par opportunité — au-delà de la simple décote, le rendement espéré et l'asymétrie se recalculent au cours</div>
               </div>
               <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>{setEditorTab('watchlist');setAddNew(true);setEditId(null);setTab('editeur');}}>
                 + Ajouter un titre à suivre
               </button>
             </div>
 
+            {/* Sélecteur de tri / lentille de classement */}
+            <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:14,flexWrap:'wrap'}}>
+              <span style={{fontSize:11,color:'#9CA3AF',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.05em'}}>Trier par</span>
+              {[{id:'marge',l:'Marge vs cible'},{id:'pabrai',l:'Rdt espéré · Pabrai'},{id:'rochon',l:'Rdt espéré · Rochon'},{id:'asym',l:'Asymétrie'}].map(({id,l})=>(
+                <button key={id} onClick={()=>setWlSort(id)}
+                  style={{...s.btn,background:wlSort===id?'#191919':'#F0EFE9',color:wlSort===id?'#fff':'#6B7280',padding:'4px 12px',fontSize:12}}>{l}</button>
+              ))}
+            </div>
+
             <div style={{overflowX:'auto',borderRadius:12,border:'1px solid #EEEDE9',background:'#FFFFFF'}}>
               <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
                 <thead>
                   <tr style={{background:'#FAFAF8'}}>
+                    <th style={{...s.th,width:28}}></th>
                     <th style={{...s.th,width:36}}>#</th>
                     <th style={s.th}>Titre</th><th style={s.th}>Catégorie</th><th style={s.th}>Type</th><th style={s.th}>Cours</th><th style={s.th}>52 sem.</th>
+                    <th style={s.th} title="Écart à la moyenne mobile 200 jours">MM200</th>
                     <th style={s.th}>PC1</th><th style={s.th}>Marge PC1</th>
                     <th style={s.th}>PC2</th><th style={s.th}>Marge PC2</th>
                     <th style={s.th}>PC3</th><th style={s.th}>Marge PC3</th>
-                    <th style={s.th}>MoS</th><th style={s.th}></th>
+                    <th style={s.th}>MoS</th>
+                    <th style={s.th} title="Rendement espéré annualisé — P : Pabrai (VE pondérée) · R : Rochon (central)">Rdt espéré</th>
+                    <th style={s.th} title="Asymétrie Pabrai : hausse (vers Bull) / baisse (vers Bear) au cours actuel">Asym.</th>
+                    <th style={s.th}></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {wlMerged.length===0&&(
-                    <tr><td colSpan={14} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>
+                  {wlRows.length===0&&(
+                    <tr><td colSpan={18} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>
                       Aucun titre — ajoutez un titre à suivre via l'Éditeur (enveloppe « Watchlist ») ou renseignez PC1 sur une position détenue
                     </td></tr>
                   )}
-                  {wlMerged.map((l,idx)=>{
-                    const mg=lineMargins(l);
+                  {wlRows.map(({l,mg},idx)=>{
+                    const v=mg.valo;
                     const tgt=targetIdx(l);
                     const tgtMos=[null,mg.mos1,mg.mos2,mg.mos3][tgt];
-                    const isPortfolio=l.wlType==='portfolio';
                     const rowBg=tgtMos==null?'transparent':tgtMos>=0?'#F0FDF4':tgtMos>=-5?'#FFFBEB':'#FEF2F2';
                     const cells=[[l.pc1,mg.mos1,'pc1_on',1],[mg.pc2,mg.mos2,'pc2_on',2],[mg.pc3,mg.mos3,'pc3_on',3]];
+                    const isExp=wlExp.has(l.ticker);
                     return(
-                      <tr key={l.ticker} style={{background:rowBg}}>
+                      <Fragment key={l.ticker}>
+                      <tr style={{background:rowBg}}>
+                        <td style={{...s.td,color:'#9CA3AF',fontSize:12,cursor:'pointer'}} onClick={()=>{const n=new Set(wlExp);n.has(l.ticker)?n.delete(l.ticker):n.add(l.ticker);setWlExp(n);}}>{isExp?'▾':'▸'}</td>
                         <td style={{...s.td,color:'#9CA3AF',fontWeight:700}}>{idx+1}</td>
                         <td style={s.td}><div style={{fontWeight:600}}>{l.name}</div><div style={{fontSize:11,color:'#9CA3AF'}}>{l.ticker}</div></td>
                         <td style={s.td}>{l.cat?<span style={{color:CAT_CLR[l.cat]||'#6B7280',fontSize:11,fontWeight:600}}>{l.cat}</span>:<span style={{color:'#D1D5DB'}}>—</span>}</td>
@@ -1376,6 +1562,10 @@ function App(){
                               </div>
                             </div>
                           )}
+                        </td>
+                        <td style={s.td} title={mg.ma200!=null?('MM200 = '+fmt(mg.ma200)):'MM200 indisponible'}>
+                          {mg.ma200pct==null?<span style={{color:'#D1D5DB'}}>—</span>:
+                            <span style={{fontWeight:600,color:mg.ma200pct>=0?'#16A34A':'#D97706'}}>{mg.ma200pct>=0?'↑':'↓'} {(mg.ma200pct>=0?'+':'')+fmt(mg.ma200pct,0)}%</span>}
                         </td>
                         {cells.map(([pc,mos,key,n])=>{
                           const on=l[key]!==false;
@@ -1398,9 +1588,22 @@ function App(){
                         })}
                         <td style={{...s.td,color:'#6B7280'}}>{l.mos}%</td>
                         <td style={s.td}>
+                          {(v.erP==null&&v.erR==null)?<span style={{color:'#D1D5DB'}}>—</span>:(
+                            <div style={{lineHeight:1.3}}>
+                              {v.erP!=null&&<div style={{fontWeight:700,color:erClr(v.erP)}} title="Pabrai — VE pondérée, total annualisé">P {fmtPct(v.erP)}<span style={{fontWeight:400,color:'#9CA3AF',fontSize:10}}>/an</span></div>}
+                              {v.erR!=null&&<div style={{fontSize:11,color:'#9CA3AF'}} title="Rochon — central, total annualisé">R {fmtPct(v.erR)}/an</div>}
+                            </div>
+                          )}
+                        </td>
+                        <td style={s.td}>{v.hasP?<span style={{fontWeight:700,color:v.asym==null?'#9CA3AF':(v.asym===Infinity||v.asym>=3?'#16A34A':v.asym>=1?'#CA8A04':'#DC2626')}}>{fmtAsym(v.asym)}</span>:<span style={{color:'#D1D5DB'}}>—</span>}</td>
+                        <td style={s.td}>
                           {l.wlType==='watchpos'&&(
                             <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 10px',fontSize:11}} title="Modifier dans l'Éditeur"
                               onClick={()=>{setEditId(l.id);setEditorTab('watchlist');setTab('editeur');}}>→ Éditeur</button>
+                          )}
+                          {l.wlType==='portfolio'&&(
+                            <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 10px',fontSize:11}} title="Modifier dans l'Éditeur"
+                              onClick={()=>{if(l.id)setEditId(l.id);setEditorTab('portfolio');setTab('editeur');}}>→ Éditeur</button>
                           )}
                           {l.wlType==='watch'&&(
                             <div style={{display:'flex',gap:6,alignItems:'center'}}>
@@ -1410,12 +1613,18 @@ function App(){
                           )}
                         </td>
                       </tr>
+                      {isExp&&(
+                        <tr><td colSpan={18} style={{padding:'16px 24px',background:'#FAFAF8',borderBottom:'1px solid #EEEDE9'}}>
+                          <WlDeepDive l={l} mg={mg}/>
+                        </td></tr>
+                      )}
+                      </Fragment>
                     );
                   })}
                 </tbody>
               </table>
             </div>
-            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>☑ Cible active (colonnes décochées grisées) · tri par marge vers la cible active la plus haute, titres sans cible active en bas · 52 sem. = position du cours entre bas et haut · 🟢 cible atteinte/dépassée · 🟡 à moins de 5 % (approche) · 🔴 au-delà</div>
+            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>▸ Cliquez sur le chevron pour le détail valorisation (scénarios, rendement espéré, asymétrie) · ☑ cible active · MM200 = écart à la moyenne mobile 200 j (↑ au-dessus / ↓ en-dessous) · Rdt espéré : P = Pabrai (espérance pondérée), R = Rochon (central), recalculés au cours · 🟢 cible atteinte · 🟡 approche · 🔴 au-delà</div>
           </div>
         )}
 
