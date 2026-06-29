@@ -656,9 +656,9 @@ function WlDeepDive({l,mg}){
   const card={background:'#FFFFFF',border:'1px solid #EEEDE9',borderRadius:8,padding:'12px 14px'};
   const scenClr={Bear:'#DC2626',Base:'#6B7280',Bull:'#16A34A'};
   return (
-    <div style={{display:'flex',flexWrap:'wrap',gap:14}}>
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))',gap:12,alignItems:'start'}}>
       {l.pc1>0&&(
-        <div style={{...card,minWidth:240}}>
+        <div style={{...card}}>
           <Lbl>Cibles d'entrée · MoS requise {l.mos}%</Lbl>
           {[['PC1 — Initiation',l.pc1,mg.mos1],['PC2 — Accumulation',mg.pc2,mg.mos2],['PC3 — Conviction',mg.pc3,mg.mos3]].map(([lab,p,mos])=>(
             <div key={lab} style={{display:'flex',justifyContent:'space-between',gap:16,padding:'3px 0',fontSize:13}}>
@@ -669,7 +669,7 @@ function WlDeepDive({l,mg}){
         </div>
       )}
       {(v.hasP||v.hasR)&&(
-        <div style={{...card,minWidth:240}}>
+        <div style={{...card}}>
           <Lbl>Rendement espéré · horizon {v.H} ans</Lbl>
           {v.hasR&&<div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13}}>
             <span style={{color:'#6B7280'}}>Rochon central <span style={{color:'#9CA3AF',fontSize:11}}>({px(v.roch)})</span></span>
@@ -686,7 +686,7 @@ function WlDeepDive({l,mg}){
         </div>
       )}
       {mg.hurdle!=null&&mg.erBasis!=null&&(
-        <div style={{...card,minWidth:240}}>
+        <div style={{...card}}>
           <Lbl>Taux exigé · {l.cat}</Lbl>
           <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13}}>
             <span style={{color:'#6B7280'}}>Sans-risque <span style={{color:'#9CA3AF',fontSize:11}}>(réf. US)</span></span><span>{fmt(mg.rfUsed,2)}%</span>
@@ -707,22 +707,22 @@ function WlDeepDive({l,mg}){
         </div>
       )}
       {v.hasP&&(
-        <div style={{...card,minWidth:300}}>
+        <div style={{...card}}>
           <Lbl>Scénarios Pabrai · prix à {v.H} ans</Lbl>
           <table style={{borderCollapse:'collapse',fontSize:12,width:'100%'}}>
             <thead><tr>
-              <th style={{textAlign:'left',color:'#9CA3AF',fontWeight:600,padding:'2px 8px 4px 0'}}>Scénario</th>
-              <th style={{textAlign:'right',color:'#9CA3AF',fontWeight:600,padding:'2px 8px 4px'}}>Prix</th>
-              <th style={{textAlign:'right',color:'#9CA3AF',fontWeight:600,padding:'2px 8px 4px'}}>Proba</th>
-              <th style={{textAlign:'right',color:'#9CA3AF',fontWeight:600,padding:'2px 0 4px 8px'}}>Rdt/an</th>
+              <th style={{textAlign:'left',color:'#9CA3AF',fontWeight:600,padding:'2px 5px 4px 0'}}>Scénario</th>
+              <th style={{textAlign:'right',color:'#9CA3AF',fontWeight:600,padding:'2px 5px 4px'}}>Prix</th>
+              <th style={{textAlign:'right',color:'#9CA3AF',fontWeight:600,padding:'2px 5px 4px'}}>Proba</th>
+              <th style={{textAlign:'right',color:'#9CA3AF',fontWeight:600,padding:'2px 0 4px 5px'}}>Rdt/an</th>
             </tr></thead>
             <tbody>
               {v.scen.map(sc=>(
                 <tr key={sc.k}>
-                  <td style={{padding:'3px 8px 3px 0',color:scenClr[sc.k],fontWeight:700}}>{sc.k}</td>
-                  <td style={{padding:'3px 8px',textAlign:'right'}}>{px(sc.px)}</td>
-                  <td style={{padding:'3px 8px',textAlign:'right',color:'#6B7280'}}>{fmt(sc.p,0)}%</td>
-                  <td style={{padding:'3px 0 3px 8px',textAlign:'right',fontWeight:600,color:erClr(sc.r)}}>{fmtPct(sc.r)}</td>
+                  <td style={{padding:'3px 5px 3px 0',color:scenClr[sc.k],fontWeight:700}}>{sc.k}</td>
+                  <td style={{padding:'3px 5px',textAlign:'right'}}>{px(sc.px)}</td>
+                  <td style={{padding:'3px 5px',textAlign:'right',color:'#6B7280'}}>{fmt(sc.p,0)}%</td>
+                  <td style={{padding:'3px 0 3px 5px',textAlign:'right',fontWeight:600,color:erClr(sc.r)}}>{fmtPct(sc.r)}</td>
                 </tr>
               ))}
             </tbody>
@@ -731,7 +731,7 @@ function WlDeepDive({l,mg}){
         </div>
       )}
       {v.hasP&&(
-        <div style={{...card,minWidth:240}}>
+        <div style={{...card}}>
           <Lbl>Asymétrie (au cours actuel)</Lbl>
           <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13}}>
             <span style={{color:'#6B7280'}}>Gain attendu <span style={{color:'#9CA3AF',fontSize:11}}>(espérance)</span></span>
