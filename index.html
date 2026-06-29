@@ -62,6 +62,7 @@ const { useState, useEffect, Fragment } = React;
 const CATS    = ['Défensif','Quality Core','Quality Satellite','Outsider'];
 const ENVS    = ['PEA','CTO','PER'];
 const CAT_CLR = {'Défensif':'#0D9488','Quality Core':'#2563EB','Quality Satellite':'#7C3AED','Outsider':'#D97706','Liquidités':'#64748B'};
+const CAT_SHORT = {'Défensif':'Def','Quality Core':'Qcore','Quality Satellite':'Qsat','Outsider':'Outs','Liquidités':'Liq'};
 // Taux exigé par catégorie = sans-risque (réf. US 10 ans, %) + prime de risque (pts).
 // Valeurs par défaut, surchargées par le panneau éditable (table app_settings, clé 'hurdles').
 const HURDLE_CATS = ['Défensif','Quality Core','Quality Satellite','Outsider'];
@@ -173,7 +174,7 @@ function PerfDot({tri,holdM,result,masked}){
 
 const CASH_TYPES = ['apport','retrait','dividende']; // apport/dividende = +cash, retrait = −cash
 const FX_TICKERS = ['EURUSD=X','EURCAD=X','EURDKK=X'];
-const RF_TICKER  = '^TNX';  // CBOE US 10 ans — coté en dixièmes (43,72 = 4,372 %)
+const RF_TICKER  = '^TNX';  // CBOE US 10 ans — Yahoo cote en % direct (4,37) ou en dixièmes (43,7) selon période ; normalisé au fetch
 
 // Seed — catégories migrées vers le nouveau schéma. Mouvements vides : à renseigner via l'éditeur.
 const SEED = [
@@ -778,7 +779,7 @@ function App(){
   const [bucketEditId,setBucketEditId]=useState(null);
   const [bucketDelId, setBucketDelId] =useState(null);
   const [editorTab,setEditorTab]=useState('portfolio'); // sous-onglet éditeur : portfolio / watchlist / sortis
-  const [wlSort,    setWlSort]   = useState('marge');   // tri watchlist : marge cible / rdt Pabrai / rdt Rochon / asymétrie / excès
+  const [wlSort,    setWlSort]   = useState('excess');  // tri watchlist par défaut : excès vs taux exigé (puis marge / Pabrai / Rochon / asymétrie)
   const [wlExp,     setWlExp]    = useState(new Set()); // lignes watchlist dépliées (deep dive valorisation)
   const [hurdleCfg, setHurdleCfg]= useState(HURDLE_DEFAULT); // taux exigés (sans-risque + primes par catégorie)
   const [hurdlePanel,setHurdlePanel]=useState(false);   // panneau d'édition des taux exigés ouvert ?
@@ -951,7 +952,7 @@ function App(){
       const px=await fetchAllPrices(allTickers);
       const newFX={};
       FX_TICKERS.forEach(t=>{if(px[t]){newFX[t]=px[t].p;delete px[t];}});
-      if(px[RF_TICKER]){setRfLive(px[RF_TICKER].p/10);delete px[RF_TICKER];}  // ^TNX coté en dixièmes
+      if(px[RF_TICKER]){const raw=px[RF_TICKER].p;setRfLive(raw>15?raw/10:raw);delete px[RF_TICKER];}  // ^TNX : Yahoo cote tantôt en % direct (4,37), tantôt en dixièmes (43,7) → /10 seulement si >15
       setFX(newFX);setPrices(px);setLastUpd(new Date());
     }catch(e){setError('Erreur : '+e.message);}
     setFetching(false);
@@ -1642,10 +1643,10 @@ function App(){
                         <td style={{...s.td,color:'#9CA3AF',fontSize:12,cursor:'pointer'}} onClick={()=>{const n=new Set(wlExp);n.has(l.ticker)?n.delete(l.ticker):n.add(l.ticker);setWlExp(n);}}>{isExp?'▾':'▸'}</td>
                         <td style={{...s.td,color:'#9CA3AF',fontWeight:700}}>{idx+1}</td>
                         <td style={s.td}><div style={{fontWeight:600}}>{l.name}</div><div style={{fontSize:11,color:'#9CA3AF'}}>{l.ticker}</div></td>
-                        <td style={s.td}>{l.cat?<span style={{color:CAT_CLR[l.cat]||'#6B7280',fontSize:11,fontWeight:600}}>{l.cat}</span>:<span style={{color:'#D1D5DB'}}>—</span>}</td>
+                        <td style={s.td}>{l.cat?<span style={{color:CAT_CLR[l.cat]||'#6B7280',fontSize:11,fontWeight:600}} title={l.cat}>{CAT_SHORT[l.cat]||l.cat}</span>:<span style={{color:'#D1D5DB'}}>—</span>}</td>
                         <td style={s.td}>{
                           l.wlType==='portfolio'?<Badge text={l.env||'Portfolio'} color={ENV_CLR[l.env]||'#6B7280'}/>
-                          :l.wlType==='watchpos'?<Badge text="Watchlist" color="#9CA3AF"/>
+                          :l.wlType==='watchpos'?<Badge text="Watch" color="#9CA3AF"/>
                           :<Badge text="Watch (ancien)" color="#D1D5DB"/>
                         }</td>
                         <td style={s.td}><span style={{fontWeight:600}}>{mg.cours?fmt(mg.cours):'—'}</span>{mg.cur&&<span style={{fontSize:10,color:'#9CA3AF',marginLeft:3}}>{mg.cur}</span>}</td>
