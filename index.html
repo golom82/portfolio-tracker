@@ -1612,7 +1612,7 @@ function App(){
             )}
 
             <div style={{overflowX:'auto',borderRadius:12,border:'1px solid #EEEDE9',background:'#FFFFFF'}}>
-              <table className="wl-table" style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+              <table className="wl-table" style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
                 <thead>
                   <tr style={{background:'#FAFAF8'}}>
                     <th style={{...s.th,width:28}}></th>
@@ -1623,7 +1623,7 @@ function App(){
                     <th style={s.th}>PC2</th><th style={s.th}>Marge PC2</th>
                     <th style={s.th}>PC3</th><th style={s.th}>Marge PC3</th>
                     <th style={s.th}>MoS</th>
-                    <th style={{...s.th,minWidth:76}} title="Rendement espéré annualisé — P : Pabrai (espérance VE) · R : Rochon (central)">Rdt espéré</th>
+                    <th style={{...s.th,minWidth:76}} title="Rendement espéré annualisé — P : Pabrai (espérance VE) · R : Rochon (central)">Rdt</th>
                     <th style={s.th} title="Asymétrie : gain attendu (espérance) / perte Bear (non diluée)">Asym.</th>
                     <th style={s.th}></th>
                   </tr>
@@ -1702,12 +1702,12 @@ function App(){
                         <td style={s.td}>{v.hasP?<span style={{fontWeight:700,color:asymClr(v.asym)}}>{fmtAsym(v.asym)}</span>:<span style={{color:'#D1D5DB'}}>—</span>}</td>
                         <td style={s.td}>
                           {l.wlType==='watchpos'&&(
-                            <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 10px',fontSize:11}} title="Modifier dans l'Éditeur"
-                              onClick={()=>{setEditId(l.id);setEditorTab('watchlist');setTab('editeur');}}>→ Éditeur</button>
+                            <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 8px',fontSize:13}} title="Modifier dans l'Éditeur"
+                              onClick={()=>{setEditId(l.id);setEditorTab('watchlist');setTab('editeur');}}>✎</button>
                           )}
                           {l.wlType==='portfolio'&&(
-                            <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 10px',fontSize:11}} title="Modifier dans l'Éditeur"
-                              onClick={()=>{if(l.id)setEditId(l.id);setEditorTab('portfolio');setTab('editeur');}}>→ Éditeur</button>
+                            <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 8px',fontSize:13}} title="Modifier dans l'Éditeur"
+                              onClick={()=>{if(l.id)setEditId(l.id);setEditorTab('portfolio');setTab('editeur');}}>✎</button>
                           )}
                           {l.wlType==='watch'&&(
                             <div style={{display:'flex',gap:6,alignItems:'center'}}>
