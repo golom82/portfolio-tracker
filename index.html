@@ -646,28 +646,19 @@ function TitleStats({c,mask}){
 function WlDeepDive({l,mg}){
   const v=mg.valo, cur=mg.cur;
   const px=n=>n==null?'—':fmt(n)+(cur?' '+cur:'');
-  const hasAny=(l.pc1>0)||v.hasP||v.hasR;
-  if(!hasAny) return (
+  const hasVal=v.hasP||v.hasR;
+  if(!hasVal) return (
     <div style={{fontSize:12,color:'#9CA3AF',lineHeight:1.6}}>
-      Aucun paramètre de valorisation renseigné. Ajoute PC1 / MoS et — pour le rendement espéré et l'asymétrie — le central Rochon et les scénarios Pabrai dans l'Éditeur (section « Valorisation »).
+      Aucune valorisation renseignée. Ajoute le central Rochon et/ou les scénarios Pabrai dans l'Éditeur (section « Valorisation ») pour afficher rendement espéré, taux exigé et asymétrie.
     </div>
   );
   const Lbl=({children})=><div style={{fontSize:10,color:'#9CA3AF',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>{children}</div>;
   const card={background:'#FFFFFF',border:'1px solid #EEEDE9',borderRadius:8,padding:'12px 14px'};
   const scenClr={Bear:'#DC2626',Base:'#6B7280',Bull:'#16A34A'};
+  const cTaux=mg.hurdle!=null&&mg.erBasis!=null;
+  const nCards=[true,cTaux,v.hasP,v.hasP].filter(Boolean).length;  // Rendement + Taux + Scénarios + Asymétrie (selon données dispo)
   return (
-    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))',gap:12,alignItems:'start'}}>
-      {l.pc1>0&&(
-        <div style={{...card}}>
-          <Lbl>Cibles d'entrée · MoS requise {l.mos}%</Lbl>
-          {[['PC1 — Initiation',l.pc1,mg.mos1],['PC2 — Accumulation',mg.pc2,mg.mos2],['PC3 — Conviction',mg.pc3,mg.mos3]].map(([lab,p,mos])=>(
-            <div key={lab} style={{display:'flex',justifyContent:'space-between',gap:16,padding:'3px 0',fontSize:13}}>
-              <span style={{color:'#6B7280'}}>{lab}</span>
-              <span><strong>{px(p)}</strong> <span style={{color:mosClr(mos),fontWeight:700,marginLeft:6}}>{mos==null?'':(mos>=0?'+':'')+fmt(mos)+'%'}</span></span>
-            </div>
-          ))}
-        </div>
-      )}
+    <div style={{display:'grid',gridTemplateColumns:'repeat('+nCards+', minmax(0, 1fr))',gap:12,alignItems:'stretch'}}>
       {(v.hasP||v.hasR)&&(
         <div style={{...card}}>
           <Lbl>Rendement espéré · horizon {v.H} ans</Lbl>
