@@ -97,7 +97,7 @@ const THEME_CLR = {'Hyperscalers':'#2563EB','Divertissement':'#DB2777','Serial a
 // Historique Yahoo (proxy /api/history) → rendements log hebdomadaires → corrélation de Pearson.
 // Deux lectures : « métier » (en devise locale, parenté économique pure) et « portefeuille » (en €,
 // avec le facteur de change commun à toutes les lignes non-€). Calcul À LA DEMANDE (jamais à l'init).
-const HIST_RANGE='3y', HIST_INTERVAL='1wk';
+const HIST_RANGE='5y', HIST_INTERVAL='1wk';
 const CORR_MIN_WEEKS=52;    // < 1 an de recouvrement commun → paire affichée « n/a »
 const NEFF_MIN_WEEKS=104;   // historique mini (~2 ans) pour entrer dans le calcul du N_eff (fenêtre commune saine, matrice PSD)
 const SNAP_STALE_DAYS=90;   // au-delà, le dernier instantané est signalé comme « à rafraîchir »
@@ -2166,7 +2166,7 @@ function App(){
               </div>
             )}
             {riskErr&&<div style={{fontSize:13,color:'#DC2626',marginBottom:12}}>⚠️ {riskErr}</div>}
-            {riskBusy&&<div style={{fontSize:13,color:'#CF6D56',marginBottom:12}}>Téléchargement de l'historique 3 ans et calcul des matrices…</div>}
+            {riskBusy&&<div style={{fontSize:13,color:'#CF6D56',marginBottom:12}}>Téléchargement de l'historique 5 ans et calcul des matrices…</div>}
 
             {!riskData&&!riskBusy&&(
               <div style={{...s.card,textAlign:'center',color:'#9CA3AF',padding:40}}>
@@ -2227,7 +2227,7 @@ function App(){
                     ))}
                   </div>
                   <div style={{fontSize:11,color:'#D1D5DB',marginTop:10,lineHeight:1.6}}>
-                    Corrélations sur <strong>3 ans</strong>, rendements <strong>hebdomadaires</strong> (Pearson sur rendements log). Cellules = coefficient ×100. Lignes ordonnées par secteur → les grappes ressortent sur la diagonale. Paires à moins d'un an de recouvrement commun affichées « n/a ». <strong>Lis les blocs de couleur, pas les décimales</strong> : chaque coefficient porte ±0,06 d'incertitude. Et rappel : en vraie crise, tout converge vers 1 — ceci cartographie le régime normal, pas le krach.
+                    Corrélations sur <strong>5 ans</strong>, rendements <strong>hebdomadaires</strong> (Pearson sur rendements log). Cellules = coefficient ×100. Lignes ordonnées par secteur → les grappes ressortent sur la diagonale. Paires à moins d'un an de recouvrement commun affichées « n/a ». <strong>Lis les blocs de couleur, pas les décimales</strong> : chaque coefficient porte ±0,06 d'incertitude. Et rappel : en vraie crise, tout converge vers 1 — ceci cartographie le régime normal, pas le krach.
                   </div>
                 </div>
 
