@@ -17,10 +17,6 @@
     ::-webkit-scrollbar{width:6px;height:6px}
     ::-webkit-scrollbar-track{background:#F7F6F3}
     ::-webkit-scrollbar-thumb{background:#E0DED8;border-radius:3px}
-    /* Watchlist : padding horizontal réduit pour faire tenir le tableau dans la largeur écran (n'affecte que ce tableau) */
-    .wl-table th, .wl-table td{padding-left:5px;padding-right:5px}
-    .wl-table th:first-child, .wl-table td:first-child{padding-left:10px}
-    .wl-table th:last-child, .wl-table td:last-child{padding-right:10px}
   </style>
 </head>
 <body>
@@ -66,7 +62,6 @@ const { useState, useEffect, Fragment } = React;
 const CATS    = ['Défensif','Quality Core','Quality Satellite','Outsider'];
 const ENVS    = ['PEA','CTO','PER'];
 const CAT_CLR = {'Défensif':'#0D9488','Quality Core':'#2563EB','Quality Satellite':'#7C3AED','Outsider':'#D97706','Liquidités':'#64748B'};
-const CAT_SHORT = {'Défensif':'Def','Quality Core':'Qcore','Quality Satellite':'Qsat','Outsider':'Outs','Liquidités':'Liq'};
 // Taux exigé par catégorie = sans-risque (réf. US 10 ans, %) + prime de risque (pts).
 // Valeurs par défaut, surchargées par le panneau éditable (table app_settings, clé 'hurdles').
 const HURDLE_CATS = ['Défensif','Quality Core','Quality Satellite','Outsider'];
@@ -137,6 +132,22 @@ function pearson(a,b){
 const round2=n=>n==null?null:Math.round(n*100)/100;
 const round0=n=>n==null?null:Math.round(n);
 
+// Décalage inter-place sur les barres hebdo Yahoo (ex. Amsterdam daté le dimanche, NYSE le lundi
+// suivant) : on apparie deux séries « au plus proche à ±TOL_DAYS jours » plutôt que sur une date
+// strictement identique — sinon aucune paire EU × US ne se rencontre jamais (« mur » Atlantique).
+const TOL_DAYS=3;
+const dnum=s=>Date.parse(s+'T00:00:00Z')/864e5;   // 'YYYY-MM-DD' → n° de jour entier
+// Appariement two-pointer de deux séries triées (dates en n° de jour). Renvoie [pa, pb] alignés.
+function alignPair(dA,vA,dB,vB){
+  const pa=[],pb=[]; let x=0,y=0;
+  while(x<dA.length&&y<dB.length){
+    const diff=dA[x]-dB[y];
+    if(Math.abs(diff)<=TOL_DAYS){pa.push(vA[x]);pb.push(vB[y]);x++;y++;}
+    else if(diff<0)x++; else y++;
+  }
+  return [pa,pb];
+}
+
 // ── Pastille de performance : TRI annualisé (money-weighted), rendu en échelle qualitative ──
 // Jamais de chiffre de perf affiché (anti-biais d'ancrage) : seule la couleur parle.
 // TRI = taux qui annule la VAN des flux datés en € (achats −, ventes + dividendes +, valo du jour +).
@@ -178,7 +189,7 @@ function PerfDot({tri,holdM,result,masked}){
 
 const CASH_TYPES = ['apport','retrait','dividende']; // apport/dividende = +cash, retrait = −cash
 const FX_TICKERS = ['EURUSD=X','EURCAD=X','EURDKK=X'];
-const RF_TICKER  = '^TNX';  // CBOE US 10 ans — Yahoo cote en % direct (4,37) ou en dixièmes (43,7) selon période ; normalisé au fetch
+const RF_TICKER  = '^TNX';  // CBOE US 10 ans — coté en dixièmes (43,72 = 4,372 %)
 
 // Seed — catégories migrées vers le nouveau schéma. Mouvements vides : à renseigner via l'éditeur.
 const SEED = [
@@ -646,21 +657,30 @@ function TitleStats({c,mask}){
 function WlDeepDive({l,mg}){
   const v=mg.valo, cur=mg.cur;
   const px=n=>n==null?'—':fmt(n)+(cur?' '+cur:'');
-  const hasVal=v.hasP||v.hasR;
-  if(!hasVal) return (
+  const hasAny=(l.pc1>0)||v.hasP||v.hasR;
+  if(!hasAny) return (
     <div style={{fontSize:12,color:'#9CA3AF',lineHeight:1.6}}>
-      Aucune valorisation renseignée. Ajoute le central Rochon et/ou les scénarios Pabrai dans l'Éditeur (section « Valorisation ») pour afficher rendement espéré, taux exigé et asymétrie.
+      Aucun paramètre de valorisation renseigné. Ajoute PC1 / MoS et — pour le rendement espéré et l'asymétrie — le central Rochon et les scénarios Pabrai dans l'Éditeur (section « Valorisation »).
     </div>
   );
   const Lbl=({children})=><div style={{fontSize:10,color:'#9CA3AF',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>{children}</div>;
   const card={background:'#FFFFFF',border:'1px solid #EEEDE9',borderRadius:8,padding:'12px 14px'};
   const scenClr={Bear:'#DC2626',Base:'#6B7280',Bull:'#16A34A'};
-  const cTaux=mg.hurdle!=null&&mg.erBasis!=null;
-  const nCards=[true,cTaux,v.hasP,v.hasP].filter(Boolean).length;  // Rendement + Taux + Scénarios + Asymétrie (selon données dispo)
   return (
-    <div style={{display:'grid',gridTemplateColumns:'repeat('+nCards+', minmax(0, 1fr))',gap:12,alignItems:'stretch'}}>
+    <div style={{display:'flex',flexWrap:'wrap',gap:14}}>
+      {l.pc1>0&&(
+        <div style={{...card,minWidth:240}}>
+          <Lbl>Cibles d'entrée · MoS requise {l.mos}%</Lbl>
+          {[['PC1 — Initiation',l.pc1,mg.mos1],['PC2 — Accumulation',mg.pc2,mg.mos2],['PC3 — Conviction',mg.pc3,mg.mos3]].map(([lab,p,mos])=>(
+            <div key={lab} style={{display:'flex',justifyContent:'space-between',gap:16,padding:'3px 0',fontSize:13}}>
+              <span style={{color:'#6B7280'}}>{lab}</span>
+              <span><strong>{px(p)}</strong> <span style={{color:mosClr(mos),fontWeight:700,marginLeft:6}}>{mos==null?'':(mos>=0?'+':'')+fmt(mos)+'%'}</span></span>
+            </div>
+          ))}
+        </div>
+      )}
       {(v.hasP||v.hasR)&&(
-        <div style={{...card}}>
+        <div style={{...card,minWidth:240}}>
           <Lbl>Rendement espéré · horizon {v.H} ans</Lbl>
           {v.hasR&&<div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13}}>
             <span style={{color:'#6B7280'}}>Rochon central <span style={{color:'#9CA3AF',fontSize:11}}>({px(v.roch)})</span></span>
@@ -677,7 +697,7 @@ function WlDeepDive({l,mg}){
         </div>
       )}
       {mg.hurdle!=null&&mg.erBasis!=null&&(
-        <div style={{...card}}>
+        <div style={{...card,minWidth:240}}>
           <Lbl>Taux exigé · {l.cat}</Lbl>
           <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13}}>
             <span style={{color:'#6B7280'}}>Sans-risque <span style={{color:'#9CA3AF',fontSize:11}}>(réf. US)</span></span><span>{fmt(mg.rfUsed,2)}%</span>
@@ -698,22 +718,22 @@ function WlDeepDive({l,mg}){
         </div>
       )}
       {v.hasP&&(
-        <div style={{...card}}>
+        <div style={{...card,minWidth:300}}>
           <Lbl>Scénarios Pabrai · prix à {v.H} ans</Lbl>
           <table style={{borderCollapse:'collapse',fontSize:12,width:'100%'}}>
             <thead><tr>
-              <th style={{textAlign:'left',color:'#9CA3AF',fontWeight:600,padding:'2px 5px 4px 0'}}>Scénario</th>
-              <th style={{textAlign:'right',color:'#9CA3AF',fontWeight:600,padding:'2px 5px 4px'}}>Prix</th>
-              <th style={{textAlign:'right',color:'#9CA3AF',fontWeight:600,padding:'2px 5px 4px'}}>Proba</th>
-              <th style={{textAlign:'right',color:'#9CA3AF',fontWeight:600,padding:'2px 0 4px 5px'}}>Rdt/an</th>
+              <th style={{textAlign:'left',color:'#9CA3AF',fontWeight:600,padding:'2px 8px 4px 0'}}>Scénario</th>
+              <th style={{textAlign:'right',color:'#9CA3AF',fontWeight:600,padding:'2px 8px 4px'}}>Prix</th>
+              <th style={{textAlign:'right',color:'#9CA3AF',fontWeight:600,padding:'2px 8px 4px'}}>Proba</th>
+              <th style={{textAlign:'right',color:'#9CA3AF',fontWeight:600,padding:'2px 0 4px 8px'}}>Rdt/an</th>
             </tr></thead>
             <tbody>
               {v.scen.map(sc=>(
                 <tr key={sc.k}>
-                  <td style={{padding:'3px 5px 3px 0',color:scenClr[sc.k],fontWeight:700}}>{sc.k}</td>
-                  <td style={{padding:'3px 5px',textAlign:'right'}}>{px(sc.px)}</td>
-                  <td style={{padding:'3px 5px',textAlign:'right',color:'#6B7280'}}>{fmt(sc.p,0)}%</td>
-                  <td style={{padding:'3px 0 3px 5px',textAlign:'right',fontWeight:600,color:erClr(sc.r)}}>{fmtPct(sc.r)}</td>
+                  <td style={{padding:'3px 8px 3px 0',color:scenClr[sc.k],fontWeight:700}}>{sc.k}</td>
+                  <td style={{padding:'3px 8px',textAlign:'right'}}>{px(sc.px)}</td>
+                  <td style={{padding:'3px 8px',textAlign:'right',color:'#6B7280'}}>{fmt(sc.p,0)}%</td>
+                  <td style={{padding:'3px 0 3px 8px',textAlign:'right',fontWeight:600,color:erClr(sc.r)}}>{fmtPct(sc.r)}</td>
                 </tr>
               ))}
             </tbody>
@@ -722,7 +742,7 @@ function WlDeepDive({l,mg}){
         </div>
       )}
       {v.hasP&&(
-        <div style={{...card}}>
+        <div style={{...card,minWidth:240}}>
           <Lbl>Asymétrie (au cours actuel)</Lbl>
           <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13}}>
             <span style={{color:'#6B7280'}}>Gain attendu <span style={{color:'#9CA3AF',fontSize:11}}>(espérance)</span></span>
@@ -774,7 +794,7 @@ function App(){
   const [bucketEditId,setBucketEditId]=useState(null);
   const [bucketDelId, setBucketDelId] =useState(null);
   const [editorTab,setEditorTab]=useState('portfolio'); // sous-onglet éditeur : portfolio / watchlist / sortis
-  const [wlSort,    setWlSort]   = useState('excess');  // tri watchlist par défaut : excès vs taux exigé (puis marge / Pabrai / Rochon / asymétrie)
+  const [wlSort,    setWlSort]   = useState('marge');   // tri watchlist : marge cible / rdt Pabrai / rdt Rochon / asymétrie / excès
   const [wlExp,     setWlExp]    = useState(new Set()); // lignes watchlist dépliées (deep dive valorisation)
   const [hurdleCfg, setHurdleCfg]= useState(HURDLE_DEFAULT); // taux exigés (sans-risque + primes par catégorie)
   const [hurdlePanel,setHurdlePanel]=useState(false);   // panneau d'édition des taux exigés ouvert ?
@@ -947,7 +967,7 @@ function App(){
       const px=await fetchAllPrices(allTickers);
       const newFX={};
       FX_TICKERS.forEach(t=>{if(px[t]){newFX[t]=px[t].p;delete px[t];}});
-      if(px[RF_TICKER]){const raw=px[RF_TICKER].p;setRfLive(raw>15?raw/10:raw);delete px[RF_TICKER];}  // ^TNX : Yahoo cote tantôt en % direct (4,37), tantôt en dixièmes (43,7) → /10 seulement si >15
+      if(px[RF_TICKER]){setRfLive(px[RF_TICKER].p/10);delete px[RF_TICKER];}  // ^TNX coté en dixièmes
       setFX(newFX);setPrices(px);setLastUpd(new Date());
     }catch(e){setError('Erreur : '+e.message);}
     setFetching(false);
@@ -1059,16 +1079,17 @@ function App(){
         return (ia<0?99:ia)-(ib<0?99:ib)||a.localeCompare(b);
       });
 
-      // Matrice pairwise sur fenêtre commune par paire (une ligne jeune ne tronque pas toute la matrice)
+      // Index date→n° de jour (une fois) pour l'appariement tolérant au décalage inter-place
+      const dn={}; valid.forEach(t=>{dn[t]=series[t].dates.map(dnum);});
+      // Matrice pairwise sur fenêtre commune par paire (une ligne jeune ne tronque pas toute la matrice ;
+      // appariement à ±TOL_DAYS jours pour que les places EU et US se rejoignent malgré leur datage décalé)
       const mkMatrix=field=>{
         const M=valid.map(()=>valid.map(()=>null));
         for(let i=0;i<valid.length;i++){
           M[i][i]=1;
           for(let j=i+1;j<valid.length;j++){
             const A=series[valid[i]],B=series[valid[j]];
-            const bi={}; B.dates.forEach((d,k)=>bi[d]=k);
-            const pa=[],pb=[];
-            A.dates.forEach((d,k)=>{if(bi[d]!=null){pa.push(A[field][k]);pb.push(B[field][bi[d]]);}});
+            const [pa,pb]=alignPair(dn[valid[i]],A[field],dn[valid[j]],B[field]);
             if(pa.length-1<CORR_MIN_WEEKS){M[i][j]=M[j][i]=null;continue;}
             const c=pearson(logReturns(pa),logReturns(pb));
             M[i][j]=M[j][i]=c;
@@ -1082,15 +1103,23 @@ function App(){
       const core=valid.filter(t=>series[t].dates.length-1>=NEFF_MIN_WEEKS);
       let neffLocal=null,neffEur=null,avgLocal=null,avgEur=null,coreUsed=[];
       if(core.length>=2){
-        let common=null;
-        core.forEach(t=>{const ds=new Set(series[t].dates);common=common==null?ds:new Set([...common].filter(d=>ds.has(d)));});
-        const cd=[...common].sort();
-        if(cd.length-1>=CORR_MIN_WEEKS){
+        // Grille commune tolérante (±TOL_DAYS) : on cale sur la série la plus longue, puis on rattache
+        // chaque ligne à la date de référence la plus proche → EU et US entrent dans la même grille.
+        const ref=core.reduce((a,b)=>series[b].dates.length>series[a].dates.length?b:a);
+        const near=(arr,target)=>{let lo=0,hi=arr.length-1,best=-1,bd=Infinity;
+          while(lo<=hi){const mid=(lo+hi)>>1,diff=arr[mid]-target,ad=Math.abs(diff);
+            if(ad<bd){bd=ad;best=mid;} if(diff<0)lo=mid+1;else if(diff>0)hi=mid-1;else break;}
+          return bd<=TOL_DAYS?best:-1;};
+        const rows=[];
+        dn[ref].forEach(rd=>{const cols={};let ok=true;
+          for(const t of core){const k=near(dn[t],rd);if(k<0){ok=false;break;}cols[t]=k;}
+          if(ok)rows.push(cols);});
+        if(rows.length-1>=CORR_MIN_WEEKS){
           coreUsed=core;
           const retL={},retE={};
-          core.forEach(t=>{const di={};series[t].dates.forEach((d,k)=>di[d]=k);
-            retL[t]=logReturns(cd.map(d=>series[t].local[di[d]]));
-            retE[t]=logReturns(cd.map(d=>series[t].eur[di[d]]));});
+          core.forEach(t=>{
+            retL[t]=logReturns(rows.map(r=>series[t].local[r[t]]));
+            retE[t]=logReturns(rows.map(r=>series[t].eur[r[t]]));});
           const buildR=ret=>{const m=core.length,R=core.map(()=>core.map(()=>0));
             for(let i=0;i<m;i++){R[i][i]=1;for(let j=i+1;j<m;j++){const c=pearson(ret[core[i]],ret[core[j]])||0;R[i][j]=R[j][i]=c;}}return R;};
           const RL=buildR(retL),RE=buildR(retE);
@@ -1603,18 +1632,18 @@ function App(){
             )}
 
             <div style={{overflowX:'auto',borderRadius:12,border:'1px solid #EEEDE9',background:'#FFFFFF'}}>
-              <table className="wl-table" style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
                 <thead>
                   <tr style={{background:'#FAFAF8'}}>
                     <th style={{...s.th,width:28}}></th>
                     <th style={{...s.th,width:36}}>#</th>
-                    <th style={s.th}>Titre</th><th style={s.th} title="Catégorie">Cat</th><th style={s.th}>Type</th><th style={s.th}>Cours</th><th style={s.th}>52 sem.</th>
+                    <th style={s.th}>Titre</th><th style={s.th}>Catégorie</th><th style={s.th}>Type</th><th style={s.th}>Cours</th><th style={s.th}>52 sem.</th>
                     <th style={s.th} title="Écart à la moyenne mobile 200 jours">MM200</th>
                     <th style={s.th}>PC1</th><th style={s.th}>Marge PC1</th>
                     <th style={s.th}>PC2</th><th style={s.th}>Marge PC2</th>
                     <th style={s.th}>PC3</th><th style={s.th}>Marge PC3</th>
                     <th style={s.th}>MoS</th>
-                    <th style={{...s.th,minWidth:76}} title="Rendement espéré annualisé — P : Pabrai (espérance VE) · R : Rochon (central)">Rdt</th>
+                    <th style={{...s.th,minWidth:96}} title="Rendement espéré annualisé — P : Pabrai (espérance VE) · R : Rochon (central)">Rdt espéré</th>
                     <th style={s.th} title="Asymétrie : gain attendu (espérance) / perte Bear (non diluée)">Asym.</th>
                     <th style={s.th}></th>
                   </tr>
@@ -1638,16 +1667,16 @@ function App(){
                         <td style={{...s.td,color:'#9CA3AF',fontSize:12,cursor:'pointer'}} onClick={()=>{const n=new Set(wlExp);n.has(l.ticker)?n.delete(l.ticker):n.add(l.ticker);setWlExp(n);}}>{isExp?'▾':'▸'}</td>
                         <td style={{...s.td,color:'#9CA3AF',fontWeight:700}}>{idx+1}</td>
                         <td style={s.td}><div style={{fontWeight:600}}>{l.name}</div><div style={{fontSize:11,color:'#9CA3AF'}}>{l.ticker}</div></td>
-                        <td style={s.td}>{l.cat?<span style={{color:CAT_CLR[l.cat]||'#6B7280',fontSize:11,fontWeight:600}} title={l.cat}>{CAT_SHORT[l.cat]||l.cat}</span>:<span style={{color:'#D1D5DB'}}>—</span>}</td>
+                        <td style={s.td}>{l.cat?<span style={{color:CAT_CLR[l.cat]||'#6B7280',fontSize:11,fontWeight:600}}>{l.cat}</span>:<span style={{color:'#D1D5DB'}}>—</span>}</td>
                         <td style={s.td}>{
                           l.wlType==='portfolio'?<Badge text={l.env||'Portfolio'} color={ENV_CLR[l.env]||'#6B7280'}/>
-                          :l.wlType==='watchpos'?<Badge text="Watch" color="#9CA3AF"/>
+                          :l.wlType==='watchpos'?<Badge text="Watchlist" color="#9CA3AF"/>
                           :<Badge text="Watch (ancien)" color="#D1D5DB"/>
                         }</td>
                         <td style={s.td}><span style={{fontWeight:600}}>{mg.cours?fmt(mg.cours):'—'}</span>{mg.cur&&<span style={{fontSize:10,color:'#9CA3AF',marginLeft:3}}>{mg.cur}</span>}</td>
                         <td style={s.td}>
                           {mg.pct52==null?<span style={{color:'#D1D5DB'}}>—</span>:(
-                            <div style={{minWidth:78}} title={'Bas 52 sem. '+fmt(mg.l52)+' · Haut '+fmt(mg.h52)}>
+                            <div style={{minWidth:96}} title={'Bas 52 sem. '+fmt(mg.l52)+' · Haut '+fmt(mg.h52)}>
                               <div style={{position:'relative',height:6,background:'#EEEDE9',borderRadius:3}}>
                                 <div style={{position:'absolute',left:'calc('+mg.pct52+'% - 3px)',top:-2,width:6,height:10,borderRadius:2,background:'#191919'}}/>
                               </div>
@@ -1673,7 +1702,7 @@ function App(){
                               </td>
                               <td style={{...s.td,opacity:on?1:0.35}}>
                                 <span style={{fontWeight:700,color:mosClr(mos)}}>{mos==null?'—':(mos>=0?'+':'')+fmt(mos)+'%'}</span>
-                                {mos!=null&&<div style={{marginTop:3,height:3,background:'#EEEDE9',borderRadius:2,width:46}}>
+                                {mos!=null&&<div style={{marginTop:3,height:3,background:'#EEEDE9',borderRadius:2,width:60}}>
                                   <div style={{width:Math.min(Math.abs(mos),100)+'%',height:'100%',background:mosClr(mos),borderRadius:2}}/>
                                 </div>}
                               </td>
@@ -1681,7 +1710,7 @@ function App(){
                           );
                         })}
                         <td style={{...s.td,color:'#6B7280'}}>{l.mos}%</td>
-                        <td style={{...s.td,minWidth:76}}>
+                        <td style={{...s.td,minWidth:96}}>
                           {(v.erP==null&&v.erR==null)?<span style={{color:'#D1D5DB'}}>—</span>:(
                             <div style={{lineHeight:1.3}}>
                               {v.erP!=null&&<div style={{fontWeight:700,color:erClr(v.erP),whiteSpace:'nowrap'}} title="Pabrai — espérance VE, total annualisé">P {fmtPct(v.erP)}<span style={{fontWeight:400,color:'#9CA3AF',fontSize:10}}>/an</span></div>}
@@ -1693,12 +1722,12 @@ function App(){
                         <td style={s.td}>{v.hasP?<span style={{fontWeight:700,color:asymClr(v.asym)}}>{fmtAsym(v.asym)}</span>:<span style={{color:'#D1D5DB'}}>—</span>}</td>
                         <td style={s.td}>
                           {l.wlType==='watchpos'&&(
-                            <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 8px',fontSize:13}} title="Modifier dans l'Éditeur"
-                              onClick={()=>{setEditId(l.id);setEditorTab('watchlist');setTab('editeur');}}>✎</button>
+                            <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 10px',fontSize:11}} title="Modifier dans l'Éditeur"
+                              onClick={()=>{setEditId(l.id);setEditorTab('watchlist');setTab('editeur');}}>→ Éditeur</button>
                           )}
                           {l.wlType==='portfolio'&&(
-                            <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 8px',fontSize:13}} title="Modifier dans l'Éditeur"
-                              onClick={()=>{if(l.id)setEditId(l.id);setEditorTab('portfolio');setTab('editeur');}}>✎</button>
+                            <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 10px',fontSize:11}} title="Modifier dans l'Éditeur"
+                              onClick={()=>{if(l.id)setEditId(l.id);setEditorTab('portfolio');setTab('editeur');}}>→ Éditeur</button>
                           )}
                           {l.wlType==='watch'&&(
                             <div style={{display:'flex',gap:6,alignItems:'center'}}>
