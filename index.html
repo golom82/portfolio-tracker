@@ -233,9 +233,13 @@ const mosClr = n => n==null?'#9CA3AF':n>=0?'#16A34A':n>=-5?'#D97706':'#DC2626';
 // Paramètres FIGÉS, recopiés de la table §8 du dossier (en DEVISE LOCALE du titre) ; le SEUL élément live est le cours.
 //  • 1A-1D (croissance CA, effet marge, réduction d'actions, dividende) : indépendants du cours → points figés.
 //  • 1E (normalisation du multiple) : dépend du cours → recalculé : (M_sortie × métrique/action ÷ cours)^(1/10) − 1.
-//  • TCAC 10 ans du scénario = 1A+1B+1C+1D + 1E (sommation, convention du dossier ; 1D reste figé au cours du dossier).
+//  • 1D (dividende) : si un dividende par action (dps) est saisi, le rendement est recalculé au cours (dps ÷ cours) dans
+//    les trois scénarios — c'est ce que fait le dossier au prix cible (ex. Rollins : 0,73/37,5 = 2 pts, 0,73/30 = 2,5 pts).
+//    Sans dps, la ligne « Dividende » de la table §8 est prise telle quelle (points figés).
+//  • TCAC 10 ans du scénario = 1A+1B+1C+1D + 1E (sommation, convention du dossier).
 //  • Cible d'entrée = cours auquel le scénario CENTRAL atteint le rendement exigé, toutes autres hypothèses inchangées
-//    (l'ajustement passe par le multiple d'entrée) : P* = M_sortie × métrique ÷ (1 + exigé − ops_central)^10.
+//    (l'ajustement passe par le multiple d'entrée) : sans dps, forme fermée P* = M_sortie × métrique ÷ (1 + exigé − ops)^10 ;
+//    avec dps, bissection (le dividende dépend de P).
 //  • Verdict mécanique : central ≥ exigé → Achat ; sinon Prix insuffisant (cible P*) ; « Passer » gravé prime sur tout.
 // Aucune probabilité, aucune espérance : trois scénarios ancrés dans la thèse (l'Optimiste peut être ABSENT → « — »).
 const pontOf  = l => (l&&l.pont&&typeof l.pont==='object')?l.pont:null;
@@ -247,17 +251,30 @@ function pontHurdle(p){
   const raw=Math.ceil((rf+prime)*2-1e-9)/2;
   return Math.max(raw, p?.defensif?PONT_FLOOR_DEF:PONT_FLOOR);
 }
-const pontOps = sc => sc?PONT_COMPS.reduce((a,c)=>a+num(sc[c.k]),0):null;   // 1A+1B+1C+1D (points)
-// Cible d'entrée du scénario central (devise locale) — indépendante du cours
+// Rendement du dividende en points : live (dps ÷ cours) si dps saisi, sinon la valeur gravée du scénario
+const pontDiv = (sc,dps,cours) => (dps>0&&cours>0)?dps/cours*100:num(sc?.div);
+// 1A+1B+1C+1D (points) ; dps/cours optionnels (sans eux : dividende figé)
+const pontOps = (sc,dps,cours) => sc?num(sc.croissance)+num(sc.marge)+num(sc.actions)+pontDiv(sc,dps,cours):null;
+// Cible d'entrée du scénario central (devise locale) — indépendante du cours du jour
 function pontCible(p){
-  const c=p?.scen?.central, m=num(p?.metric_ps), h=pontHurdle(p);
+  const c=p?.scen?.central, m=num(p?.metric_ps), h=pontHurdle(p), dps=num(p?.dps);
   if(!c||!(m>0)||!(num(c.mult)>0)||h==null) return null;
-  const d=1+(h-pontOps(c))/100;
-  return d>0?num(c.mult)*m/Math.pow(d,PONT_H):null;
+  const opsFixe=num(c.croissance)+num(c.marge)+num(c.actions);
+  const K=num(c.mult)*m;                                           // M_sortie × métrique
+  if(!(dps>0)){                                                    // forme fermée
+    const d=1+(h-opsFixe-num(c.div))/100;
+    return d>0?K/Math.pow(d,PONT_H):null;
+  }
+  // dividende live : f(P) = opsFixe + dps/P + ((K/P)^(1/H) − 1) − h, strictement décroissante en P → bissection
+  const f=P=>opsFixe+dps/P*100+(Math.pow(K/P,1/PONT_H)-1)*100-h;
+  let lo=K/1e4, hi=K*1e4;
+  if(f(lo)<0||f(hi)>0) return null;
+  for(let i=0;i<100;i++){const mid=(lo+hi)/2;if(f(mid)>0)lo=mid;else hi=mid;}
+  return (lo+hi)/2;
 }
 function pontMetrics(l, cours){
   if(!hasPont(l)) return {ok:false};
-  const p=pontOf(l), m=num(p.metric_ps);
+  const p=pontOf(l), m=num(p.metric_ps), dps=num(p.dps);
   const hurdle=pontHurdle(p);                                                                          // %
   const multEff = sc => (sc&&cours>0&&num(sc.mult)>0)?(Math.pow(num(sc.mult)*m/cours,1/PONT_H)-1)*100:null;  // 1E live (points)
   const entryMult = cours>0?cours/m:null;
@@ -265,8 +282,8 @@ function pontMetrics(l, cours){
   PONT_SCENS.forEach(({k})=>{
     const sc=p.scen?.[k];
     if(!sc||!(num(sc.mult)>0)){scen[k]=null;return;}        // scénario absent (Optimiste sans option nommée)
-    const o=pontOps(sc), e=multEff(sc);
-    scen[k]={...sc,ops:o,multEff:e,tcac:(e!=null)?o+e:null};
+    const o=pontOps(sc,dps,cours), e=multEff(sc);
+    scen[k]={...sc,divEff:pontDiv(sc,dps,cours),ops:o,multEff:e,tcac:(e!=null)?o+e:null};
   });
   const c=scen.central;
   const cible=pontCible(p);
@@ -275,7 +292,7 @@ function pontMetrics(l, cours){
   const verdict=p.passer?'passer':(excess==null?null:excess>=0?'achat':'insuffisant');
   const ageM=monthsElapsed(p.date);
   const seuilHaut=num(p.seuil_haut)>0?num(p.seuil_haut):null;
-  return {ok:true,p,m,hurdle,entryMult,scen,cible,marge,excess,verdict,ageM,stale:ageM!=null&&ageM>=12,seuilHaut,
+  return {ok:true,p,m,dps,divLive:dps>0,hurdle,entryMult,scen,cible,marge,excess,verdict,ageM,stale:ageM!=null&&ageM>=12,seuilHaut,
           overHaut:seuilHaut!=null&&cours>0&&cours>=seuilHaut};
 }
 // Fausse précision interdite : rendements et composantes au demi-point, cible au chiffre rond
@@ -517,10 +534,11 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
         const nv=e=>e.target.value===''?'':parseFloat(e.target.value);
         const cell={...s.inp,textAlign:'right',padding:'4px 6px',fontSize:12};
         const hur=pontHurdle({rf:parseFloat(p.rf),prime:parseFloat(p.prime),defensif:!!p.defensif});
-        const cib=pontCible({metric_ps:parseFloat(p.metric_ps),rf:parseFloat(p.rf),prime:parseFloat(p.prime),defensif:!!p.defensif,
+        const dpsF=parseFloat(p.dps), divLive=dpsF>0;
+        const cib=pontCible({metric_ps:parseFloat(p.metric_ps),rf:parseFloat(p.rf),prime:parseFloat(p.prime),defensif:!!p.defensif,dps:dpsF,
           scen:{central:Object.fromEntries([...PONT_COMPS.map(c=>c.k),'mult'].map(k=>[k,parseFloat(sc('central')[k])]))}});
-        const anyC=PONT_COMPS.some(c=>sc('central')[c.k]!==''&&sc('central')[c.k]!=null);
-        const opsC=anyC?pontOps(Object.fromEntries(PONT_COMPS.map(c=>[c.k,parseFloat(sc('central')[c.k])]))):NaN;
+        const anyC=PONT_COMPS.some(c=>c.k!=='div'&&sc('central')[c.k]!==''&&sc('central')[c.k]!=null);
+        const opsC=anyC?['croissance','marge','actions'].reduce((a,k)=>a+(parseFloat(sc('central')[k])||0),0):NaN;
         return (
         <div style={{marginTop:14,padding:'12px 14px',background:'#FAFAF8',border:'1px solid #EEEDE9',borderRadius:8}}>
           <div style={{fontSize:11,color:'#9CA3AF',marginBottom:2,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.05em'}}>Pont de rendement — dossier maître §8-§9 <span style={{textTransform:'none',fontWeight:400}}>(facultatif)</span></div>
@@ -533,6 +551,7 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
             <div><label style={s.lbl}>Sans-risque gravé %</label><input style={s.inp} type="number" step="any" value={p.rf??''} onChange={e=>pu({rf:nv(e)})}/></div>
             <div><label style={s.lbl}>Prime de superformance (pts)</label><input style={s.inp} type="number" step="any" value={p.prime??''} onChange={e=>pu({prime:nv(e)})}/></div>
             <div><label style={s.lbl}>Seuil de sur-extension (haut)</label><input style={s.inp} type="number" step="any" value={p.seuil_haut??''} onChange={e=>pu({seuil_haut:nv(e)})}/></div>
+            <div><label style={s.lbl} title="Si renseigné, le rendement du dividende est recalculé au cours (et au prix cible) dans les trois scénarios ; la ligne « Dividende » de la table est alors ignorée">Dividende par action (live)</label><input style={s.inp} type="number" step="any" value={p.dps??''} onChange={e=>pu({dps:nv(e)})}/></div>
           </div>
           <div style={{display:'flex',gap:18,flexWrap:'wrap',marginBottom:10,fontSize:12}}>
             <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',color:'#0D9488'}}><input type="checkbox" checked={!!p.defensif} onChange={e=>pu({defensif:e.target.checked})}/>Défensif éligible (5 critères) → plancher {PONT_FLOOR_DEF} %</label>
@@ -547,15 +566,17 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
               {[...PONT_COMPS,{k:'mult',l:'Multiple de sortie (×)'}].map(comp=>(
                 <tr key={comp.k}>
                   <td style={{padding:'2px 10px 2px 0',color:'#6B7280',whiteSpace:'nowrap'}}>{comp.l}</td>
-                  {PONT_SCENS.map(x=><td key={x.k} style={{padding:'2px 6px'}}><input style={cell} type="number" step="any" value={sc(x.k)[comp.k]??''} onChange={e=>psc(x.k,comp.k,nv(e))}/></td>)}
+                  {PONT_SCENS.map(x=><td key={x.k} style={{padding:'2px 6px'}}>{(comp.k==='div'&&divLive)
+                    ?<div style={{...cell,background:'#F5F5F4',color:'#9CA3AF',fontSize:11}} title="Recalculé au cours : dividende par action ÷ cours">live</div>
+                    :<input style={cell} type="number" step="any" value={sc(x.k)[comp.k]??''} onChange={e=>psc(x.k,comp.k,nv(e))}/>}</td>)}
                 </tr>
               ))}
             </tbody>
           </table>
           <div style={{fontSize:11,color:'#9CA3AF',marginTop:8,lineHeight:1.6}}>
             Exigé : <strong style={{color:'#6B7280'}}>{hur==null?'—':fmtRet(hur)}</strong>
-            {isNaN(opsC)?null:<span> · central hors multiple : <strong style={{color:'#6B7280'}}>{fmtPtsH(opsC)}</strong></span>}
-            {cib!=null&&<span> · cible d'entrée ≈ <strong style={{color:'#6B7280'}}>{fmt(roundCible(cib))}</strong> <span>(central au taux exigé, via le multiple d'entrée)</span></span>}
+            {isNaN(opsC)?null:<span> · central hors multiple{divLive?' et dividende':''} : <strong style={{color:'#6B7280'}}>{fmtPtsH(opsC)}</strong></span>}
+            {cib!=null&&<span> · cible d'entrée ≈ <strong style={{color:'#6B7280'}}>{fmt(roundCible(cib))}</strong> <span>(central au taux exigé, via le multiple d'entrée{divLive?', dividende recalculé à la cible':''})</span></span>}
           </div>
         </div>
         );
@@ -572,7 +593,7 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
             if(!raw) return null;
             const scn=k=>{const sc=raw.scen?.[k]||{};const o={};PONT_COMPS.forEach(c=>o[c.k]=vnum(sc[c.k]));o.mult=vnum(sc.mult);return o;};
             const out={date:raw.date||null,metric_kind:raw.metric_kind||PONT_METRICS[0],metric_ps:vnum(raw.metric_ps),rf:vnum(raw.rf),prime:vnum(raw.prime),
-              defensif:!!raw.defensif,passer:!!raw.passer,seuil_haut:vnum(raw.seuil_haut),scen:{pess:scn('pess'),central:scn('central'),opt:scn('opt')}};
+              defensif:!!raw.defensif,passer:!!raw.passer,seuil_haut:vnum(raw.seuil_haut),dps:vnum(raw.dps),scen:{pess:scn('pess'),central:scn('central'),opt:scn('opt')}};
             if(out.scen.opt.mult==null&&PONT_COMPS.every(c=>out.scen.opt[c.k]==null)) out.scen.opt=null;   // Optimiste absent
             const empty=out.metric_ps==null&&out.rf==null&&out.prime==null&&out.scen.central.mult==null;
             return empty?null:out;
@@ -728,8 +749,8 @@ function WlDeepDive({l,mg,rfLive}){
           <tbody>
             {PONT_COMPS.map(comp=>(
               <tr key={comp.k}>
-                <td style={{padding:'3px 8px 3px 0',color:'#6B7280'}}>{comp.l}</td>
-                {PONT_SCENS.map(x=>{const sc=v.scen[x.k];return <td key={x.k} style={{padding:'3px 0 3px 10px',textAlign:'right'}}>{sc?fmtPtsH(num(sc[comp.k])):<span style={{color:'#D1D5DB'}}>—</span>}</td>;})}
+                <td style={{padding:'3px 8px 3px 0',color:'#6B7280'}}>{comp.l}{comp.k==='div'&&v.divLive&&<span style={{color:'#9CA3AF',fontSize:11}}> ({fmt(v.dps)} {cur} au cours)</span>}</td>
+                {PONT_SCENS.map(x=>{const sc=v.scen[x.k];return <td key={x.k} style={{padding:'3px 0 3px 10px',textAlign:'right'}}>{sc?fmtPtsH(comp.k==='div'?sc.divEff:num(sc[comp.k])):<span style={{color:'#D1D5DB'}}>—</span>}</td>;})}
               </tr>
             ))}
             <tr>
@@ -743,7 +764,7 @@ function WlDeepDive({l,mg,rfLive}){
           </tbody>
         </table>
         <div style={{fontSize:10,color:'#D1D5DB',marginTop:6,lineHeight:1.5}}>
-          {p.metric_kind} {fmt(v.m)} {cur} par action · multiple d'entrée au cours {v.entryMult?fmt(v.entryMult,1)+'×':'—'}. Seule la ligne multiple se recalcule au cours ; le reste est gravé au dossier. Demi-points.
+          {p.metric_kind} {fmt(v.m)} {cur} par action · multiple d'entrée au cours {v.entryMult?fmt(v.entryMult,1)+'×':'—'}. {v.divLive?'Lignes multiple et dividende recalculées au cours':'Seule la ligne multiple se recalcule au cours'} ; le reste est gravé au dossier. Demi-points.
           {!v.scen.opt&&<span> Pas de scénario optimiste : aucune option nommée au dossier.</span>}
         </div>
       </div>
