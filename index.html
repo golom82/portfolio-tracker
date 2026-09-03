@@ -62,10 +62,14 @@ const { useState, useEffect, Fragment } = React;
 const CATS    = ['Défensif','Quality Core','Quality Satellite','Outsider'];
 const ENVS    = ['PEA','CTO','PER'];
 const CAT_CLR = {'Défensif':'#0D9488','Quality Core':'#2563EB','Quality Satellite':'#7C3AED','Outsider':'#D97706','Liquidités':'#64748B'};
-// Taux exigé par catégorie = sans-risque (réf. US 10 ans, %) + prime de risque (pts).
-// Valeurs par défaut, surchargées par le panneau éditable (table app_settings, clé 'hurdles').
-const HURDLE_CATS = ['Défensif','Quality Core','Quality Satellite','Outsider'];
-const HURDLE_DEFAULT = { rf:4.37, premiums:{'Défensif':4,'Quality Core':5.5,'Quality Satellite':7,'Outsider':9} };
+// ── Pont de rendement (méthode dossier maître, session c2) ──
+// Rendement exigé = sans-risque gravé (US 10 ans, daté) + prime de superformance, arrondi défavorable au demi-point,
+// jamais sous 10 % (8 % si titre défensif éligible aux cinq critères). Gravé PAR TITRE dans le dossier, révisé en revue annuelle.
+const PONT_H = 10;                                   // horizon du pont (années)
+const PONT_FLOOR = 10, PONT_FLOOR_DEF = 8;           // planchers du rendement exigé (%)
+const PONT_METRICS = ['BPA dilué','FCF/action','OCF/action','ANR/action'];   // métrique du multiple (choix gravé au dossier)
+const PONT_COMPS = [{k:'croissance',l:'Croissance CA'},{k:'marge',l:'Effet marge'},{k:'actions',l:'Réduction actions'},{k:'div',l:'Dividende'}];
+const PONT_SCENS = [{k:'pess',l:'Pessimiste',c:'#DC2626'},{k:'central',l:'Central',c:'#191919'},{k:'opt',l:'Optimiste',c:'#16A34A'}];
 const ENV_CLR = {PEA:'#059669',CTO:'#2563EB',PER:'#EA580C',Watchlist:'#9CA3AF'};
 // Enveloppe sentinelle : titre suivi mais pas encore acheté. VOLONTAIREMENT hors de ENVS
 // → exclu de held/exited, du cash, et de toutes les pondérations (enveloppe/catégorie/secteur/thème/IA).
@@ -189,7 +193,7 @@ function PerfDot({tri,holdM,result,masked}){
 
 const CASH_TYPES = ['apport','retrait','dividende']; // apport/dividende = +cash, retrait = −cash
 const FX_TICKERS = ['EURUSD=X','EURCAD=X','EURDKK=X'];
-const RF_TICKER  = '^TNX';  // CBOE US 10 ans — coté en dixièmes (43,72 = 4,372 %)
+const RF_TICKER  = '^TNX';  // CBOE US 10 ans — affiché à titre indicatif (écart vs sans-risque gravé), jamais appliqué
 
 // Seed — catégories migrées vers le nouveau schéma. Mouvements vides : à renseigner via l'éditeur.
 const SEED = [
@@ -225,50 +229,63 @@ const fmtQte1 = n => n==null?'—':Number(n).toLocaleString('fr-FR',{maximumFrac
 // Couleur marge : vert si cible atteinte/dépassée (≥0), jaune en zone d'approche (−5..0), rouge au-delà
 const mosClr = n => n==null?'#9CA3AF':n>=0?'#16A34A':n>=-5?'#D97706':'#DC2626';
 
-// ── Module VALORISATION (watchlist) — rendement espéré & asymétrie ──────────
-// Paramètres FIGÉS, saisis après chaque valo (en DEVISE LOCALE du titre, comme PC1/cours) ;
-// le SEUL élément live est le cours → tout se recalcule à chaque actualisation, comme les marges PC.
-//  • Rochon : valeur centrale projetée À L'HORIZON (VI à N ans, NON actualisée) → CAGR vs cours.
-//  • Pabrai : 3 prix de scénario à l'horizon + probas → VE = Σ(proba·prix) → CAGR vs cours ;
-//             asymétrie = hausse (vers Bull) / baisse (vers Bear) AU COURS ACTUEL (reproduit le rapport).
-//  Rendement « total » = CAGR capital + rendement du dividende (ajouté à plat, comme dans la valo).
-function valoMetrics(l, cours){
-  const H=num(l.horizon)||5, div=num(l.div_yield)/100;        // horizon fixe : 5 ans
-  const bear=num(l.pabrai_bear), base=num(l.pabrai_base), bull=num(l.pabrai_bull), roch=num(l.rochon_central);
-  const hasP = bear>0&&base>0&&bull>0;            // scénarios Pabrai renseignés
-  const hasR = roch>0;                            // Rochon central renseigné
-  let pT=num(l.prob_bear); if(!(pT>0)) pT=25;     // proba Bear = Bull (queue unique) ; défaut 25 → Base 50
-  const pB=pT, pU=pT, pBase=Math.max(0,100-2*pT);
-  const ve = hasP ? (bear*pB+base*pBase+bull*pU)/100 : null;   // espérance à l'horizon (Base inclus via sa proba)
-  const cagr = t => (cours>0&&t>0) ? Math.pow(t/cours,1/H)-1 : null;
-  const erP = (ve!=null&&cagr(ve)!=null) ? cagr(ve)+div : null;   // rendement espéré total — Pabrai (VE)
-  const erR = (hasR&&cagr(roch)!=null)   ? cagr(roch)+div : null; // rendement espéré total — Rochon
-  // ── Asymétrie (convention module de valo) : gain attendu (espérance) / perte Bear (non diluée) ──
-  let gain=null, lossBear=null, asym=null;
-  if(hasP&&cours>0){
-    gain=(ve-cours)/cours;            // gain attendu vs cours (le Base pèse via la VE)
-    lossBear=(cours-bear)/cours;      // perte réelle si le Bear se matérialise
-    if(lossBear<=0) asym=Infinity;    // garde-fou : cours ≤ plancher Bear → plus de downside
-    else asym=gain/lossBear;          // garde-fou : si VE ≤ cours, gain<0 → ratio négatif conservé tel quel
-  }
-  const scen = hasP ? [
-    {k:'Bear',px:bear,p:pB,  r:cagr(bear)},
-    {k:'Base',px:base,p:pBase,r:cagr(base)},
-    {k:'Bull',px:bull,p:pU,  r:cagr(bull)},
-  ] : null;
-  return {H,div,hasP,hasR,ve,erP,erR,gain,lossBear,asym,scen,roch,pBear:pB,pBull:pU,pBase};
+// ── Module PONT DE RENDEMENT (watchlist) — méthode dossier maître (c2) ─────
+// Paramètres FIGÉS, recopiés de la table §8 du dossier (en DEVISE LOCALE du titre) ; le SEUL élément live est le cours.
+//  • 1A-1D (croissance CA, effet marge, réduction d'actions, dividende) : indépendants du cours → points figés.
+//  • 1E (normalisation du multiple) : dépend du cours → recalculé : (M_sortie × métrique/action ÷ cours)^(1/10) − 1.
+//  • TCAC 10 ans du scénario = 1A+1B+1C+1D + 1E (sommation, convention du dossier ; 1D reste figé au cours du dossier).
+//  • Cible d'entrée = cours auquel le scénario CENTRAL atteint le rendement exigé, toutes autres hypothèses inchangées
+//    (l'ajustement passe par le multiple d'entrée) : P* = M_sortie × métrique ÷ (1 + exigé − ops_central)^10.
+//  • Verdict mécanique : central ≥ exigé → Achat ; sinon Prix insuffisant (cible P*) ; « Passer » gravé prime sur tout.
+// Aucune probabilité, aucune espérance : trois scénarios ancrés dans la thèse (l'Optimiste peut être ABSENT → « — »).
+const pontOf  = l => (l&&l.pont&&typeof l.pont==='object')?l.pont:null;
+const hasPont = l => { const p=pontOf(l); return !!(p&&num(p.metric_ps)>0&&p.scen&&p.scen.central&&num(p.scen.central.mult)>0); };
+// Rendement exigé (%) : rf + prime, arrondi SUPÉRIEUR au demi-point (défavorable au titre), puis plancher 10 % / 8 % (défensif)
+function pontHurdle(p){
+  const rf=num(p?.rf), prime=num(p?.prime);
+  if(!(rf>0||prime>0)) return null;
+  const raw=Math.ceil((rf+prime)*2-1e-9)/2;
+  return Math.max(raw, p?.defensif?PONT_FLOOR_DEF:PONT_FLOOR);
 }
-// Couleur du rendement espéré (annualisé) — calée sur les seuils quality (Rochon ≥ 15 %, etc.)
-const erClr = n => n==null?'#9CA3AF':n>=0.15?'#16A34A':n>=0.10?'#CA8A04':n>=0?'#D97706':'#DC2626';
-// Format compact d'un ratio d'asymétrie : ∞ si pas de downside, signe conservé (négatif = espérance < cours)
-const fmtAsym = a => a==null?'—':a===Infinity?'∞':fmt(a,1)+'×';
-// Couleur du ratio d'asymétrie
-const asymClr = a => a==null?'#9CA3AF':(a===Infinity||a>=3)?'#16A34A':a>=1?'#CA8A04':'#DC2626';
-// Format d'un rendement annualisé (entrée en décimal : 0,167 → « +16,7% »)
-const fmtPct = (x,d=1) => x==null?'—':((x>=0?'+':'')+fmt(x*100,d)+'%');
-// Excès vs taux exigé, exprimé en points (entrée décimale : 0,021 → « +2,1 pts »)
-const fmtPts = x => x==null?'—':((x>=0?'+':'')+fmt(x*100,1)+' pts');
+const pontOps = sc => sc?PONT_COMPS.reduce((a,c)=>a+num(sc[c.k]),0):null;   // 1A+1B+1C+1D (points)
+// Cible d'entrée du scénario central (devise locale) — indépendante du cours
+function pontCible(p){
+  const c=p?.scen?.central, m=num(p?.metric_ps), h=pontHurdle(p);
+  if(!c||!(m>0)||!(num(c.mult)>0)||h==null) return null;
+  const d=1+(h-pontOps(c))/100;
+  return d>0?num(c.mult)*m/Math.pow(d,PONT_H):null;
+}
+function pontMetrics(l, cours){
+  if(!hasPont(l)) return {ok:false};
+  const p=pontOf(l), m=num(p.metric_ps);
+  const hurdle=pontHurdle(p);                                                                          // %
+  const multEff = sc => (sc&&cours>0&&num(sc.mult)>0)?(Math.pow(num(sc.mult)*m/cours,1/PONT_H)-1)*100:null;  // 1E live (points)
+  const entryMult = cours>0?cours/m:null;
+  const scen={};
+  PONT_SCENS.forEach(({k})=>{
+    const sc=p.scen?.[k];
+    if(!sc||!(num(sc.mult)>0)){scen[k]=null;return;}        // scénario absent (Optimiste sans option nommée)
+    const o=pontOps(sc), e=multEff(sc);
+    scen[k]={...sc,ops:o,multEff:e,tcac:(e!=null)?o+e:null};
+  });
+  const c=scen.central;
+  const cible=pontCible(p);
+  const marge=(cible>0&&cours>0)?((cible-cours)/cible)*100:null;      // décote restante vers la cible (%)
+  const excess=(c&&c.tcac!=null&&hurdle!=null)?c.tcac-hurdle:null;   // points
+  const verdict=p.passer?'passer':(excess==null?null:excess>=0?'achat':'insuffisant');
+  const ageM=monthsElapsed(p.date);
+  const seuilHaut=num(p.seuil_haut)>0?num(p.seuil_haut):null;
+  return {ok:true,p,m,hurdle,entryMult,scen,cible,marge,excess,verdict,ageM,stale:ageM!=null&&ageM>=12,seuilHaut,
+          overHaut:seuilHaut!=null&&cours>0&&cours>=seuilHaut};
+}
+// Fausse précision interdite : rendements et composantes au demi-point, cible au chiffre rond
+const round05  = x => Math.round(x*2)/2;
+const fmtPtsH  = x => x==null?'—':((x>=0?'+':'')+fmt(round05(x),1)+' pts');
+const fmtRet   = x => x==null?'—':(fmt(round05(x),1)+' %');
+const roundCible = x => x==null?null:x>=1000?Math.round(x/10)*10:x>=100?Math.round(x/5)*5:x>=20?Math.round(x):Math.round(x*2)/2;
+const tcacClr  = (t,h) => t==null?'#9CA3AF':(h!=null&&t>=h)?'#16A34A':t>=0?'#D97706':'#DC2626';
 const excessClr = x => x==null?'#9CA3AF':x>=0?'#16A34A':'#DC2626';
+const VERDICT  = {achat:{l:'Achat',c:'#16A34A',bg:'#F0FDF4'},insuffisant:{l:'Prix insuffisant',c:'#D97706',bg:'transparent'},passer:{l:'Passer',c:'#9CA3AF',bg:'#F5F5F4'}};
 
 // Mois pleins (échus) écoulés depuis une date 'YYYY-MM-DD'
 function monthsElapsed(dateStr){
@@ -435,7 +452,6 @@ function MovementsEditor({value,onChange,s}){
 }
 
 const POS_TEXT_FIELDS=[{k:'ticker',l:'Ticker Yahoo',t:'text'},{k:'name',l:'Nom',t:'text'}];
-const POS_NUM_FIELDS =[{k:'pc1',l:'Prix Cible 1',t:'number'},{k:'mos',l:'MoS requise %',t:'number'}];
 const WL_FIELDS=[
   {k:'ticker',l:'Ticker Yahoo',t:'text'},{k:'name',l:'Nom',t:'text'},
   {k:'pc1',l:'Prix Cible 1',t:'number'},{k:'mos',l:'MoS requise %',t:'number'},
@@ -475,11 +491,6 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
             {SECTEURS.map(x=><option key={x}>{x}</option>)}
           </select>
         </div>
-        {POS_NUM_FIELDS.map(({k,l,t})=>(
-          <div key={k}><label style={s.lbl}>{l}</label>
-            <input style={s.inp} type={t} value={f[k]??''} onChange={e=>upd(k,parseFloat(e.target.value)||0)}/>
-          </div>
-        ))}
       </div>
       <div style={{marginTop:10}}>
         <div style={{fontSize:11,color:'#9CA3AF',marginBottom:6,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.05em'}}>Thèmes <span style={{textTransform:'none',fontWeight:400}}>— lentilles transversales, plusieurs possibles (facultatif)</span></div>
@@ -497,27 +508,58 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
       </div>
       <MovementsEditor value={f.mouvements} onChange={v=>upd('mouvements',v)} s={s}/>
 
-      {/* ── Valorisation (rendement espéré & asymétrie, watchlist) — facultatif ── */}
-      <div style={{marginTop:14,padding:'12px 14px',background:'#FAFAF8',border:'1px solid #EEEDE9',borderRadius:8}}>
-        <div style={{fontSize:11,color:'#9CA3AF',marginBottom:2,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.05em'}}>Valorisation — rendement espéré & asymétrie <span style={{textTransform:'none',fontWeight:400}}>(facultatif)</span></div>
-        <div style={{fontSize:11,color:'#9CA3AF',marginBottom:10,lineHeight:1.5}}>Valeurs <strong>à 5 ans</strong>, en <strong>devise locale</strong> du titre (recopie du rapport de valo). Le cours étant live, rendement espéré et asymétrie se recalculent seuls. Laisse vide pour ne rien afficher.</div>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(130px,1fr))',gap:12}}>
-          {[
-            {k:'div_yield',l:'Dividende %/an'},
-            {k:'rochon_central',l:'Rochon central (5 ans)'},
-            {k:'pabrai_bear',l:'Pabrai Bear'},{k:'pabrai_base',l:'Pabrai Base'},{k:'pabrai_bull',l:'Pabrai Bull'},
-            {k:'prob_bear',l:'Proba Bear = Bull %'},
-          ].map(({k,l})=>(
-            <div key={k}><label style={s.lbl}>{l}</label>
-              <input style={s.inp} type="number" step="any" value={f[k]??''} onChange={e=>upd(k,e.target.value===''?'':parseFloat(e.target.value))}/>
-            </div>
-          ))}
+      {/* ── Pont de rendement (dossier maître §8-§9) — facultatif ── */}
+      {(()=>{
+        const p=f.pont||{};
+        const pu=patch=>upd('pont',{...p,...patch});
+        const sc=k=>(p.scen&&p.scen[k])||{};
+        const psc=(k,comp,v)=>pu({scen:{...(p.scen||{}),[k]:{...sc(k),[comp]:v}}});
+        const nv=e=>e.target.value===''?'':parseFloat(e.target.value);
+        const cell={...s.inp,textAlign:'right',padding:'4px 6px',fontSize:12};
+        const hur=pontHurdle({rf:parseFloat(p.rf),prime:parseFloat(p.prime),defensif:!!p.defensif});
+        const cib=pontCible({metric_ps:parseFloat(p.metric_ps),rf:parseFloat(p.rf),prime:parseFloat(p.prime),defensif:!!p.defensif,
+          scen:{central:Object.fromEntries([...PONT_COMPS.map(c=>c.k),'mult'].map(k=>[k,parseFloat(sc('central')[k])]))}});
+        const anyC=PONT_COMPS.some(c=>sc('central')[c.k]!==''&&sc('central')[c.k]!=null);
+        const opsC=anyC?pontOps(Object.fromEntries(PONT_COMPS.map(c=>[c.k,parseFloat(sc('central')[c.k])]))):NaN;
+        return (
+        <div style={{marginTop:14,padding:'12px 14px',background:'#FAFAF8',border:'1px solid #EEEDE9',borderRadius:8}}>
+          <div style={{fontSize:11,color:'#9CA3AF',marginBottom:2,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.05em'}}>Pont de rendement — dossier maître §8-§9 <span style={{textTransform:'none',fontWeight:400}}>(facultatif)</span></div>
+          <div style={{fontSize:11,color:'#9CA3AF',marginBottom:10,lineHeight:1.5}}>Recopie de la table §8 (points, TCAC {PONT_H} ans) et du rendement exigé gravé en §9, en <strong>devise locale</strong>. Seule la ligne « multiple » se recalcule au cours ; le reste est gravé. Optimiste vide = pas d'option nommée (affiché « — »).</div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(130px,1fr))',gap:12,marginBottom:10}}>
+            <div><label style={s.lbl}>Date des données (§9)</label><input style={s.inp} type="date" value={p.date||''} onChange={e=>pu({date:e.target.value})}/></div>
+            <div><label style={s.lbl}>Métrique du multiple</label>
+              <select style={s.inp} value={p.metric_kind||PONT_METRICS[0]} onChange={e=>pu({metric_kind:e.target.value})}>{PONT_METRICS.map(x=><option key={x}>{x}</option>)}</select></div>
+            <div><label style={s.lbl}>Métrique par action</label><input style={s.inp} type="number" step="any" value={p.metric_ps??''} onChange={e=>pu({metric_ps:nv(e)})}/></div>
+            <div><label style={s.lbl}>Sans-risque gravé %</label><input style={s.inp} type="number" step="any" value={p.rf??''} onChange={e=>pu({rf:nv(e)})}/></div>
+            <div><label style={s.lbl}>Prime de superformance (pts)</label><input style={s.inp} type="number" step="any" value={p.prime??''} onChange={e=>pu({prime:nv(e)})}/></div>
+            <div><label style={s.lbl}>Seuil de sur-extension (haut)</label><input style={s.inp} type="number" step="any" value={p.seuil_haut??''} onChange={e=>pu({seuil_haut:nv(e)})}/></div>
+          </div>
+          <div style={{display:'flex',gap:18,flexWrap:'wrap',marginBottom:10,fontSize:12}}>
+            <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',color:'#0D9488'}}><input type="checkbox" checked={!!p.defensif} onChange={e=>pu({defensif:e.target.checked})}/>Défensif éligible (5 critères) → plancher {PONT_FLOOR_DEF} %</label>
+            <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',color:'#6B7280'}}><input type="checkbox" checked={!!p.passer} onChange={e=>pu({passer:e.target.checked})}/>Verdict « Passer » gravé</label>
+          </div>
+          <table style={{borderCollapse:'collapse',fontSize:12}}>
+            <thead><tr>
+              <th style={{textAlign:'left',color:'#9CA3AF',fontWeight:600,padding:'2px 10px 6px 0'}}>Composante (pts)</th>
+              {PONT_SCENS.map(x=><th key={x.k} style={{textAlign:'right',color:x.c,fontWeight:700,padding:'2px 6px 6px',minWidth:96}}>{x.l}</th>)}
+            </tr></thead>
+            <tbody>
+              {[...PONT_COMPS,{k:'mult',l:'Multiple de sortie (×)'}].map(comp=>(
+                <tr key={comp.k}>
+                  <td style={{padding:'2px 10px 2px 0',color:'#6B7280',whiteSpace:'nowrap'}}>{comp.l}</td>
+                  {PONT_SCENS.map(x=><td key={x.k} style={{padding:'2px 6px'}}><input style={cell} type="number" step="any" value={sc(x.k)[comp.k]??''} onChange={e=>psc(x.k,comp.k,nv(e))}/></td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{fontSize:11,color:'#9CA3AF',marginTop:8,lineHeight:1.6}}>
+            Exigé : <strong style={{color:'#6B7280'}}>{hur==null?'—':fmtRet(hur)}</strong>
+            {isNaN(opsC)?null:<span> · central hors multiple : <strong style={{color:'#6B7280'}}>{fmtPtsH(opsC)}</strong></span>}
+            {cib!=null&&<span> · cible d'entrée ≈ <strong style={{color:'#6B7280'}}>{fmt(roundCible(cib))}</strong> <span>(central au taux exigé, via le multiple d'entrée)</span></span>}
+          </div>
         </div>
-        <div style={{fontSize:11,color:'#9CA3AF',marginTop:8}}>
-          Proba Base déduite : <strong style={{color:'#6B7280'}}>{(()=>{const t=parseFloat(f.prob_bear);return isNaN(t)?'50% (défaut Bear=Bull 25%)':Math.max(0,100-2*t)+'%';})()}</strong>
-          {(()=>{const bear=parseFloat(f.pabrai_bear),base=parseFloat(f.pabrai_base),bull=parseFloat(f.pabrai_bull);if([bear,base,bull].some(isNaN))return null;let t=parseFloat(f.prob_bear);if(isNaN(t))t=25;const pBase=Math.max(0,100-2*t);const ve=(bear*t+base*pBase+bull*t)/100;return <span> · espérance VE ≈ <strong style={{color:'#6B7280'}}>{fmt(ve)}</strong></span>;})()}
-        </div>
-      </div>
+        );
+      })()}
 
       <div style={{display:'flex',gap:16,marginTop:10,fontSize:11,color:'#9CA3AF'}}>
         <span>Premier achat : <strong style={{color:'#6B7280'}}>{fmtDate(firstBuy)}</strong></span>
@@ -526,10 +568,16 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
       <div style={{display:'flex',gap:8,marginTop:14}}>
         <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>{
           const vnum=x=>(x===''||x==null||isNaN(parseFloat(x)))?null:parseFloat(x);
-          const clean={...f,secteur:f.secteur||null,themes:Array.isArray(f.themes)?f.themes:[],
-            horizon:5,div_yield:vnum(f.div_yield),rochon_central:vnum(f.rochon_central),
-            pabrai_bear:vnum(f.pabrai_bear),pabrai_base:vnum(f.pabrai_base),pabrai_bull:vnum(f.pabrai_bull),
-            prob_bear:vnum(f.prob_bear),prob_bull:vnum(f.prob_bear),
+          const cleanPont=raw=>{
+            if(!raw) return null;
+            const scn=k=>{const sc=raw.scen?.[k]||{};const o={};PONT_COMPS.forEach(c=>o[c.k]=vnum(sc[c.k]));o.mult=vnum(sc.mult);return o;};
+            const out={date:raw.date||null,metric_kind:raw.metric_kind||PONT_METRICS[0],metric_ps:vnum(raw.metric_ps),rf:vnum(raw.rf),prime:vnum(raw.prime),
+              defensif:!!raw.defensif,passer:!!raw.passer,seuil_haut:vnum(raw.seuil_haut),scen:{pess:scn('pess'),central:scn('central'),opt:scn('opt')}};
+            if(out.scen.opt.mult==null&&PONT_COMPS.every(c=>out.scen.opt[c.k]==null)) out.scen.opt=null;   // Optimiste absent
+            const empty=out.metric_ps==null&&out.rf==null&&out.prime==null&&out.scen.central.mult==null;
+            return empty?null:out;
+          };
+          const clean={...f,secteur:f.secteur||null,themes:Array.isArray(f.themes)?f.themes:[],pont:cleanPont(f.pont),
             mouvements:(f.mouvements||[]).map(mvt=>({date:mvt.date,type:mvt.type==='vente'?'vente':'achat',qte:num(mvt.qte),montant:num(mvt.montant)}))};
           onSave(clean);
         }}>{isNew?'+ Ajouter':'✓ Sauvegarder'}</button>
@@ -654,110 +702,73 @@ function TitleStats({c,mask}){
 
 // ── Détail valorisation d'une ligne de watchlist (deep dive dépliable) ──
 // Toutes les valeurs sont en devise locale du titre ; recalculées au cours courant.
-function WlDeepDive({l,mg}){
-  const v=mg.valo, cur=mg.cur;
+function WlDeepDive({l,mg,rfLive}){
+  const v=mg.pont, cur=mg.cur;
   const px=n=>n==null?'—':fmt(n)+(cur?' '+cur:'');
-  const hasAny=(l.pc1>0)||v.hasP||v.hasR;
-  if(!hasAny) return (
+  if(!v.ok) return (
     <div style={{fontSize:12,color:'#9CA3AF',lineHeight:1.6}}>
-      Aucun paramètre de valorisation renseigné. Ajoute PC1 / MoS et — pour le rendement espéré et l'asymétrie — le central Rochon et les scénarios Pabrai dans l'Éditeur (section « Valorisation »).
+      Aucun pont de rendement renseigné. Recopie la table §8 du dossier maître (composantes, multiples de sortie, métrique par action) et le rendement exigé gravé en §9 dans l'Éditeur, section « Pont de rendement ».
     </div>
   );
   const Lbl=({children})=><div style={{fontSize:10,color:'#9CA3AF',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>{children}</div>;
   const card={background:'#FFFFFF',border:'1px solid #EEEDE9',borderRadius:8,padding:'12px 14px'};
-  const scenClr={Bear:'#DC2626',Base:'#6B7280',Bull:'#16A34A'};
+  const row={display:'flex',justifyContent:'space-between',gap:16,padding:'3px 0',fontSize:13};
+  const p=v.p, c=v.scen.central, vd=VERDICT[v.verdict];
+  const cibleR=roundCible(v.cible);
+  const phrase=v.verdict==='passer'?'passer':v.verdict==='achat'?'achat':('prix insuffisant, cible d\'entrée à '+px(cibleR));
   return (
     <div style={{display:'flex',flexWrap:'wrap',gap:14}}>
-      {l.pc1>0&&(
-        <div style={{...card,minWidth:240}}>
-          <Lbl>Cibles d'entrée · MoS requise {l.mos}%</Lbl>
-          {[['PC1 — Initiation',l.pc1,mg.mos1],['PC2 — Accumulation',mg.pc2,mg.mos2],['PC3 — Conviction',mg.pc3,mg.mos3]].map(([lab,p,mos])=>(
-            <div key={lab} style={{display:'flex',justifyContent:'space-between',gap:16,padding:'3px 0',fontSize:13}}>
-              <span style={{color:'#6B7280'}}>{lab}</span>
-              <span><strong>{px(p)}</strong> <span style={{color:mosClr(mos),fontWeight:700,marginLeft:6}}>{mos==null?'':(mos>=0?'+':'')+fmt(mos)+'%'}</span></span>
-            </div>
-          ))}
+      <div style={{...card,minWidth:360}}>
+        <Lbl>Pont de rendement · TCAC {PONT_H} ans</Lbl>
+        <table style={{borderCollapse:'collapse',fontSize:12,width:'100%'}}>
+          <thead><tr>
+            <th style={{textAlign:'left',color:'#9CA3AF',fontWeight:600,padding:'2px 8px 4px 0'}}>Composante</th>
+            {PONT_SCENS.map(x=><th key={x.k} style={{textAlign:'right',color:x.c,fontWeight:700,padding:'2px 0 4px 10px'}}>{x.l}</th>)}
+          </tr></thead>
+          <tbody>
+            {PONT_COMPS.map(comp=>(
+              <tr key={comp.k}>
+                <td style={{padding:'3px 8px 3px 0',color:'#6B7280'}}>{comp.l}</td>
+                {PONT_SCENS.map(x=>{const sc=v.scen[x.k];return <td key={x.k} style={{padding:'3px 0 3px 10px',textAlign:'right'}}>{sc?fmtPtsH(num(sc[comp.k])):<span style={{color:'#D1D5DB'}}>—</span>}</td>;})}
+              </tr>
+            ))}
+            <tr>
+              <td style={{padding:'3px 8px 3px 0',color:'#6B7280'}}>Multiple <span style={{color:'#9CA3AF',fontSize:11}}>({v.entryMult?fmt(v.entryMult,1)+'×':'—'} → sortie)</span></td>
+              {PONT_SCENS.map(x=>{const sc=v.scen[x.k];return <td key={x.k} style={{padding:'3px 0 3px 10px',textAlign:'right',whiteSpace:'nowrap'}}>{sc?<span>{fmtPtsH(sc.multEff)} <span style={{color:'#9CA3AF',fontSize:10}}>({fmt(num(sc.mult),0)}×)</span></span>:<span style={{color:'#D1D5DB'}}>—</span>}</td>;})}
+            </tr>
+            <tr>
+              <td style={{padding:'6px 8px 3px 0',fontWeight:700,borderTop:'1px solid #F0EFE9'}}>TCAC {PONT_H} ans</td>
+              {PONT_SCENS.map(x=>{const sc=v.scen[x.k];return <td key={x.k} style={{padding:'6px 0 3px 10px',textAlign:'right',fontWeight:700,borderTop:'1px solid #F0EFE9',color:sc?tcacClr(sc.tcac,v.hurdle):'#D1D5DB'}}>{sc?fmtRet(sc.tcac):'—'}</td>;})}
+            </tr>
+          </tbody>
+        </table>
+        <div style={{fontSize:10,color:'#D1D5DB',marginTop:6,lineHeight:1.5}}>
+          {p.metric_kind} {fmt(v.m)} {cur} par action · multiple d'entrée au cours {v.entryMult?fmt(v.entryMult,1)+'×':'—'}. Seule la ligne multiple se recalcule au cours ; le reste est gravé au dossier. Demi-points.
+          {!v.scen.opt&&<span> Pas de scénario optimiste : aucune option nommée au dossier.</span>}
         </div>
-      )}
-      {(v.hasP||v.hasR)&&(
-        <div style={{...card,minWidth:240}}>
-          <Lbl>Rendement espéré · horizon {v.H} ans</Lbl>
-          {v.hasR&&<div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13}}>
-            <span style={{color:'#6B7280'}}>Rochon central <span style={{color:'#9CA3AF',fontSize:11}}>({px(v.roch)})</span></span>
-            <strong style={{color:erClr(v.erR)}}>{fmtPct(v.erR)}/an</strong>
-          </div>}
-          {v.hasP&&<div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13}}>
-            <span style={{color:'#6B7280'}}>Pabrai VE <span style={{color:'#9CA3AF',fontSize:11}}>({px(v.ve)})</span></span>
-            <strong style={{color:erClr(v.erP)}}>{fmtPct(v.erP)}/an</strong>
-          </div>}
-          {v.hasP&&v.hasR&&<div style={{fontSize:11,color:'#9CA3AF',marginTop:6,paddingTop:6,borderTop:'1px solid #F0EFE9',lineHeight:1.5}}>
-            Écart Pabrai − Rochon : <strong style={{color:'#6B7280'}}>{fmtPct(v.erP-v.erR)}</strong>. Resserré = méthodes d'accord ; large = espérance sensible aux hypothèses.
-          </div>}
-          {v.div>0&&<div style={{fontSize:10,color:'#D1D5DB',marginTop:4}}>Dividende inclus : +{fmt(v.div*100,1)}%/an</div>}
-        </div>
-      )}
-      {mg.hurdle!=null&&mg.erBasis!=null&&(
-        <div style={{...card,minWidth:240}}>
-          <Lbl>Taux exigé · {l.cat}</Lbl>
-          <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13}}>
-            <span style={{color:'#6B7280'}}>Sans-risque <span style={{color:'#9CA3AF',fontSize:11}}>(réf. US)</span></span><span>{fmt(mg.rfUsed,2)}%</span>
-          </div>
-          <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13}}>
-            <span style={{color:'#6B7280'}}>Prime {l.cat}</span><span>+{fmt(mg.premUsed,1)} pts</span>
-          </div>
-          <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13,borderTop:'1px solid #F0EFE9',marginTop:2,paddingTop:5}}>
-            <span style={{color:'#6B7280',fontWeight:600}}>= Taux exigé</span><strong>{fmt(mg.hurdle*100,1)}%</strong>
-          </div>
-          <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13}}>
-            <span style={{color:'#6B7280'}}>Rendement retenu</span><strong style={{color:erClr(mg.erBasis)}}>{fmtPct(mg.erBasis)}/an</strong>
-          </div>
-          <div style={{display:'flex',justifyContent:'space-between',padding:'6px 0 0',marginTop:4,borderTop:'1px solid #F0EFE9',fontSize:13}}>
-            <span style={{color:'#6B7280',fontWeight:600}}>Excès {mg.excess>=0?'✓':''}</span><strong style={{fontSize:15,color:excessClr(mg.excess)}}>{fmtPts(mg.excess)}</strong>
-          </div>
-          <div style={{fontSize:10,color:'#D1D5DB',marginTop:6,lineHeight:1.5}}>Rendement retenu = Pabrai si dispo, sinon Rochon. ✓ = franchit sa barre de catégorie.</div>
-        </div>
-      )}
-      {v.hasP&&(
-        <div style={{...card,minWidth:300}}>
-          <Lbl>Scénarios Pabrai · prix à {v.H} ans</Lbl>
-          <table style={{borderCollapse:'collapse',fontSize:12,width:'100%'}}>
-            <thead><tr>
-              <th style={{textAlign:'left',color:'#9CA3AF',fontWeight:600,padding:'2px 8px 4px 0'}}>Scénario</th>
-              <th style={{textAlign:'right',color:'#9CA3AF',fontWeight:600,padding:'2px 8px 4px'}}>Prix</th>
-              <th style={{textAlign:'right',color:'#9CA3AF',fontWeight:600,padding:'2px 8px 4px'}}>Proba</th>
-              <th style={{textAlign:'right',color:'#9CA3AF',fontWeight:600,padding:'2px 0 4px 8px'}}>Rdt/an</th>
-            </tr></thead>
-            <tbody>
-              {v.scen.map(sc=>(
-                <tr key={sc.k}>
-                  <td style={{padding:'3px 8px 3px 0',color:scenClr[sc.k],fontWeight:700}}>{sc.k}</td>
-                  <td style={{padding:'3px 8px',textAlign:'right'}}>{px(sc.px)}</td>
-                  <td style={{padding:'3px 8px',textAlign:'right',color:'#6B7280'}}>{fmt(sc.p,0)}%</td>
-                  <td style={{padding:'3px 0 3px 8px',textAlign:'right',fontWeight:600,color:erClr(sc.r)}}>{fmtPct(sc.r)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div style={{fontSize:10,color:'#D1D5DB',marginTop:6}}>VE = Σ(proba × prix) = {px(v.ve)} · proba Base déduite (100 − Bear − Bull)</div>
-        </div>
-      )}
-      {v.hasP&&(
-        <div style={{...card,minWidth:240}}>
-          <Lbl>Asymétrie (au cours actuel)</Lbl>
-          <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13}}>
-            <span style={{color:'#6B7280'}}>Gain attendu <span style={{color:'#9CA3AF',fontSize:11}}>(espérance)</span></span>
-            <strong style={{color:v.gain>=0?'#16A34A':'#DC2626'}}>{fmtPct(v.gain)}</strong>
-          </div>
-          <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',fontSize:13}}>
-            <span style={{color:'#6B7280'}}>Perte si Bear</span>
-            <strong style={{color:v.lossBear>0?'#DC2626':'#16A34A'}}>{v.lossBear==null?'—':(v.lossBear>0?'−':'+')+fmt(Math.abs(v.lossBear)*100,1)+'%'}</strong>
-          </div>
-          <div style={{display:'flex',justifyContent:'space-between',padding:'6px 0 0',marginTop:4,borderTop:'1px solid #F0EFE9',fontSize:13}}>
-            <span style={{color:'#6B7280',fontWeight:600}}>Asymétrie</span><strong style={{fontSize:15,color:asymClr(v.asym)}}>{fmtAsym(v.asym)}</strong>
-          </div>
-          <div style={{fontSize:10,color:'#D1D5DB',marginTop:6,lineHeight:1.5}}>Gain attendu (espérance, le Base pèse via sa proba) ÷ perte Bear (non diluée). ∞ = cours sous le plancher Bear ; négatif = espérance sous le cours.</div>
-        </div>
-      )}
+      </div>
+      <div style={{...card,minWidth:240}}>
+        <Lbl>Rendement exigé · gravé {p.date?fmtDate(p.date):'(non daté)'}</Lbl>
+        <div style={row}><span style={{color:'#6B7280'}}>Sans-risque <span style={{color:'#9CA3AF',fontSize:11}}>(US 10 ans, gravé)</span></span><span>{p.rf!=null?fmt(p.rf,2)+' %':'—'}</span></div>
+        <div style={row}><span style={{color:'#6B7280'}}>Prime de superformance</span><span>{p.prime!=null?'+'+fmt(p.prime,1)+' pts':'—'}</span></div>
+        <div style={row}><span style={{color:'#6B7280'}}>Plancher</span><span style={{color:p.defensif?'#0D9488':'#6B7280'}}>{p.defensif?PONT_FLOOR_DEF+' % · défensif éligible':PONT_FLOOR+' % · standard'}</span></div>
+        <div style={{...row,borderTop:'1px solid #F0EFE9',marginTop:2,paddingTop:5}}><span style={{color:'#6B7280',fontWeight:600}}>= Exigé</span><strong>{fmtRet(v.hurdle)}</strong></div>
+        {rfLive!=null&&p.rf!=null&&<div style={{fontSize:10,color:'#D1D5DB',marginTop:6,lineHeight:1.5}}>10 ans US aujourd'hui {fmt(rfLive,2)} % ({(rfLive-p.rf>=0?'+':'')+fmt(rfLive-p.rf,2)} pt) — révision en revue annuelle uniquement, jamais un capteur.</div>}
+        {v.stale&&<div style={{fontSize:11,color:'#D97706',fontWeight:600,marginTop:6}}>Dossier de {v.ageM} mois → revue annuelle due.</div>}
+      </div>
+      <div style={{...card,minWidth:280,maxWidth:360}}>
+        <Lbl>Verdict · mécanique</Lbl>
+        <div style={{display:'inline-block',padding:'3px 10px',borderRadius:6,fontWeight:700,fontSize:13,color:vd?vd.c:'#9CA3AF',background:vd?vd.c+'14':'#F5F5F4'}}>{vd?vd.l:'—'}</div>
+        <div style={{fontSize:13,color:'#191919',marginTop:8,lineHeight:1.5,fontStyle:'italic'}}>« Le scénario central offre {fmtRet(c.tcac)} pour un profil qui en exige {fmtRet(v.hurdle)} → {phrase}. »</div>
+        <div style={{...row,marginTop:8,borderTop:'1px solid #F0EFE9',paddingTop:6}}><span style={{color:'#6B7280',fontWeight:600}}>Excès vs exigé</span><strong style={{fontSize:15,color:excessClr(v.excess)}}>{fmtPtsH(v.excess)}</strong></div>
+        {p.passer&&<div style={{fontSize:10,color:'#D1D5DB',marginTop:6}}>« Passer » est gravé au dossier : la décision prime sur la comparaison mécanique.</div>}
+      </div>
+      <div style={{...card,minWidth:240}}>
+        <Lbl>Conditions de réexamen</Lbl>
+        <div style={row}><span style={{color:'#6B7280'}}>Cible d'entrée <span style={{color:'#9CA3AF',fontSize:11}}>(bas)</span></span><span><strong>{px(cibleR)}</strong> <span style={{color:mosClr(v.marge),fontWeight:700,marginLeft:6}}>{v.marge==null?'':(v.marge>=0?'+':'')+fmt(v.marge,0)+' %'}</span></span></div>
+        <div style={row}><span style={{color:'#6B7280'}}>Sur-extension <span style={{color:'#9CA3AF',fontSize:11}}>(haut)</span></span><span>{v.seuilHaut!=null?<strong style={{color:v.overHaut?'#DC2626':'#191919'}}>{px(v.seuilHaut)}{v.overHaut?' · atteint':''}</strong>:<span style={{color:'#D1D5DB'}}>non saisi</span>}</span></div>
+        <div style={{fontSize:10,color:'#D1D5DB',marginTop:6,lineHeight:1.5}}>Cible = cours auquel le central atteint l'exigé (ajustement par le multiple d'entrée), arrondie au chiffre rond. Les capteurs de la thèse (§4) vivent dans le dossier, pas ici.</div>
+      </div>
     </div>
   );
 }
@@ -794,12 +805,9 @@ function App(){
   const [bucketEditId,setBucketEditId]=useState(null);
   const [bucketDelId, setBucketDelId] =useState(null);
   const [editorTab,setEditorTab]=useState('portfolio'); // sous-onglet éditeur : portfolio / watchlist / sortis
-  const [wlSort,    setWlSort]   = useState('marge');   // tri watchlist : marge cible / rdt Pabrai / rdt Rochon / asymétrie / excès
-  const [wlExp,     setWlExp]    = useState(new Set()); // lignes watchlist dépliées (deep dive valorisation)
-  const [hurdleCfg, setHurdleCfg]= useState(HURDLE_DEFAULT); // taux exigés (sans-risque + primes par catégorie)
-  const [hurdlePanel,setHurdlePanel]=useState(false);   // panneau d'édition des taux exigés ouvert ?
-  const [hurdleDraft,setHurdleDraft]=useState(null);    // brouillon en cours d'édition
-  const [rfLive,    setRfLive]   = useState(null);      // sans-risque US 10 ans live (^TNX/10), affiché dans le panneau
+  const [wlSort,    setWlSort]   = useState('excess');  // tri watchlist : excès vs exigé / marge vs cible / TCAC central / TCAC pessimiste
+  const [wlExp,     setWlExp]    = useState(new Set()); // lignes watchlist dépliées (deep dive pont de rendement)
+  const [rfLive,    setRfLive]   = useState(null);      // US 10 ans live (^TNX), affiché en écart vs sans-risque gravé — jamais appliqué
   // ── État module Risque ──
   const [riskBusy,  setRiskBusy]  = useState(false);
   const [riskErr,   setRiskErr]   = useState(null);
@@ -866,12 +874,7 @@ function App(){
       cashFlows.filter(x=>x.type==='dividende'&&x.ticker===p.ticker&&x.env===p.env&&x.date>=holdStart).forEach(x=>triFlows.push({date:x.date,amount:num(x.montant)}));
       if(valEUR!=null&&holdM!=null&&holdM>=6) tri=xirr([...triFlows,{date:new Date().toISOString().slice(0,10),amount:valEUR}]);
     }
-    const pc2=p.pc1>0?p.pc1*(1-p.mos/200):0;
-    const pc3=p.pc1>0?p.pc1*(1-p.mos/100):0;
-    const mos1=cours&&p.pc1?((p.pc1-cours)/p.pc1)*100:null;
-    const mos2=cours&&pc2?((pc2-cours)/pc2)*100:null;
-    const mos3=cours&&pc3?((pc3-cours)/pc3)*100:null;
-    return {mv,cours,cur,qte,buyEUR,sellEUR,investedEUR,valEUR,divEUR,realizedGain,realized,latent,result,firstBuy,last,lastType,holdM,sinceM,tri,triFlows,pc2,pc3,mos1,mos2,mos3};
+    return {mv,cours,cur,qte,buyEUR,sellEUR,investedEUR,valEUR,divEUR,realizedGain,realized,latent,result,firstBuy,last,lastType,holdM,sinceM,tri,triFlows};
   }
 
   // Fusionne plusieurs lignes d'un même ticker (ex. PEA + CTO) en une synthèse unique.
@@ -945,11 +948,6 @@ function App(){
     setSnapshots(snapData||[]);
     const {data:bucketData}=await db.from('cash_buckets').select('*').order('id');
     setBuckets(bucketData||[]);
-    // Taux exigés (table app_settings, clé 'hurdles') — silencieux si la table n'existe pas encore
-    const {data:hurdleData}=await db.from('app_settings').select('value').eq('key','hurdles').maybeSingle();
-    if(hurdleData?.value){
-      setHurdleCfg({rf:hurdleData.value.rf??HURDLE_DEFAULT.rf, premiums:{...HURDLE_DEFAULT.premiums,...(hurdleData.value.premiums||{})}});
-    }
     await doFetch(positions,watchlist);
     setLoading(false);
   }
@@ -967,7 +965,7 @@ function App(){
       const px=await fetchAllPrices(allTickers);
       const newFX={};
       FX_TICKERS.forEach(t=>{if(px[t]){newFX[t]=px[t].p;delete px[t];}});
-      if(px[RF_TICKER]){setRfLive(px[RF_TICKER].p/10);delete px[RF_TICKER];}  // ^TNX coté en dixièmes
+      if(px[RF_TICKER]){const r=px[RF_TICKER].p;setRfLive(r>15?r/10:r);delete px[RF_TICKER];}  // ^TNX : en % direct (4,37) ou en dixièmes (43,7) selon l'époque
       setFX(newFX);setPrices(px);setLastUpd(new Date());
     }catch(e){setError('Erreur : '+e.message);}
     setFetching(false);
@@ -1196,24 +1194,6 @@ function App(){
   }
   async function delBucket(id){await db.from('cash_buckets').delete().eq('id',id);setBuckets(buckets.filter(x=>x.id!==id));setBucketDelId(null);}
 
-  // Taux exigés : upsert sur la clé texte 'hurdles' (pas d'id → pas de piège identity-column)
-  async function saveHurdles(cfg){
-    setHurdleCfg(cfg);
-    const {error}=await db.from('app_settings').upsert({key:'hurdles',value:cfg,updated_at:new Date().toISOString()},{onConflict:'key'}).select();
-    if(error)setError('Sauvegarde taux exigés : '+error.message);
-  }
-
-  // Toggle d'une cible (pc1_on/pc2_on/pc3_on) sur la bonne table
-  async function setPcFlag(line,key,val){
-    if(line.wlType==='watch'){
-      await db.from('watchlist').update({[key]:val}).eq('id',line.id);
-      setWl(wl.map(x=>x.id===line.id?{...x,[key]:val}:x));
-    }else{
-      await db.from('positions').update({[key]:val}).eq('id',line.id);
-      setPos(pos.map(x=>x.id===line.id?{...x,[key]:val}:x));
-    }
-  }
-
   const toggle=id=>setExpanded(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
 
   const s={
@@ -1344,11 +1324,10 @@ function App(){
     .reduce((a,p)=>a+(calc[p.id].valEUR||0),0);
   const iaPct=totalValEUR>0?(iaEUR/totalValEUR)*100:0;
 
-  // ── Watchlist fusionnée, avec cible sélectionnable ──
-  const targetIdx = l => (l.pc1_on!==false?1:l.pc2_on!==false?2:l.pc3_on!==false?3:1);
+  // ── Watchlist fusionnée ──
   const seenTk=new Set(); const wlMerged=[];
-  // 1) titres DÉTENUS avec PC renseigné (suivi de cible sur ce qu'on possède)
-  pos.filter(p=>p.env!==WL_ENV && p.pc1>0 && calc[p.id].qte>0).forEach(p=>{
+  // 1) titres DÉTENUS avec un pont renseigné (suivi de la cible d'entrée / du verdict sur ce qu'on possède)
+  pos.filter(p=>p.env!==WL_ENV && hasPont(p) && calc[p.id].qte>0).forEach(p=>{
     if(!seenTk.has(p.ticker)){seenTk.add(p.ticker);wlMerged.push({...p,wlType:'portfolio'});}
   });
   // 2) lignes WATCHLIST (positions enveloppe=Watchlist, pas encore achetées) — éditées dans l'Éditeur
@@ -1362,39 +1341,27 @@ function App(){
   const lineMargins = l => {
     const pr=prices[l.ticker]||{};
     const px=pr.p;
-    const pc2=l.pc1>0?l.pc1*(1-l.mos/200):0, pc3=l.pc1>0?l.pc1*(1-l.mos/100):0;
-    const mk=pc=>px&&pc?((pc-px)/pc)*100:null;
     const h52=pr.h52, l52=pr.l52;
     const pct52=(px!=null&&h52!=null&&l52!=null&&h52>l52)?Math.max(0,Math.min(100,((px-l52)/(h52-l52))*100)):null;
     const ma200=pr.ma200, ma200pct=(px!=null&&ma200>0)?((px-ma200)/ma200)*100:null;  // momentum : écart à la MM200
-    const valo=valoMetrics(l,px);                                                       // rendement espéré + asymétrie (live)
-    // Taux exigé = sans-risque (réf. US) + prime de la catégorie ; excès vs rendement espéré (base Pabrai, sinon Rochon)
-    const prem=hurdleCfg?.premiums?.[l.cat];
-    const rfUsed=num(hurdleCfg?.rf), premUsed=(prem!=null?num(prem):null);
-    const hurdle=(premUsed!=null)?(rfUsed+premUsed)/100:null;                            // décimal
-    const erBasis=(valo.erP!=null)?valo.erP:(valo.erR!=null?valo.erR:null);
-    const excess=(hurdle!=null&&erBasis!=null)?erBasis-hurdle:null;
-    return {cours:px,cur:pr.c||'',pc2,pc3,mos1:mk(l.pc1),mos2:mk(pc2),mos3:mk(pc3),h52,l52,pct52,ma200,ma200pct,valo,hurdle,excess,erBasis,rfUsed,premUsed};
+    const pont=pontMetrics(l,px);                                                       // pont de rendement, cible, verdict (live au cours)
+    return {cours:px,cur:pr.c||'',h52,l52,pct52,ma200,ma200pct,pont};
   };
-  const allTargetsOff = l => !(l.pc1_on!==false||l.pc2_on!==false||l.pc3_on!==false);
-  // Pré-calcul (cours, marges, momentum, valo) une seule fois par ligne, réutilisé au tri et au rendu
+  // Pré-calcul (cours, momentum, pont) une seule fois par ligne, réutilisé au tri et au rendu
   const wlRows = wlMerged.map(l=>({l,mg:lineMargins(l)}));
   const sortVal = (l,mg)=>{
-    if(wlSort==='pabrai') return mg.valo.erP;
-    if(wlSort==='rochon') return mg.valo.erR;
-    if(wlSort==='asym')   return mg.valo.asym===Infinity?1e9:mg.valo.asym;
-    if(wlSort==='excess') return mg.excess;
-    const m=[null,mg.mos1,mg.mos2,mg.mos3][targetIdx(l)];   // 'marge' : marge vers la cible active
-    return m;
+    const v=mg.pont; if(!v.ok) return null;
+    if(wlSort==='marge')   return v.marge;
+    if(wlSort==='central') return v.scen.central?.tcac;
+    if(wlSort==='pess')    return v.scen.pess?.tcac;
+    return v.excess;                             // 'excess' (défaut)
   };
   wlRows.sort((A,B)=>{
-    if(wlSort==='marge'){
-      const aOff=allTargetsOff(A.l), bOff=allTargetsOff(B.l);
-      if(aOff!==bOff) return aOff?1:-1;          // sans cible active → en bas
-    }
+    const aP=A.mg.pont.ok&&A.mg.pont.verdict==='passer', bP=B.mg.pont.ok&&B.mg.pont.verdict==='passer';
+    if(aP!==bP) return aP?1:-1;                  // « Passer » gravé → en bas
     const va=sortVal(A.l,A.mg), vb=sortVal(B.l,B.mg);
     const na=(va==null||isNaN(va)), nb=(vb==null||isNaN(vb));
-    if(na!==nb) return na?1:-1;                  // valeurs manquantes → en bas
+    if(na!==nb) return na?1:-1;                  // sans pont / valeurs manquantes → en bas
     if(na&&nb) return 0;
     return vb-va;                                // décroissant
   });
@@ -1576,7 +1543,7 @@ function App(){
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12,flexWrap:'wrap',gap:10}}>
               <div>
                 <div style={{fontWeight:700,fontSize:16}}>Watchlist</div>
-                <div style={{fontSize:12,color:'#9CA3AF',marginTop:2}}>Classe les titres par opportunité — au-delà de la simple décote, le rendement espéré et l'asymétrie se recalculent au cours</div>
+                <div style={{fontSize:12,color:'#9CA3AF',marginTop:2}}>Pont de rendement {PONT_H} ans du dossier maître, recalculé au cours : TCAC par scénario, rendement exigé gravé, cible d'entrée, verdict mécanique</div>
               </div>
               <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>{setEditorTab('watchlist');setAddNew(true);setEditId(null);setTab('editeur');}}>
                 + Ajouter un titre à suivre
@@ -1586,50 +1553,12 @@ function App(){
             {/* Sélecteur de tri / lentille de classement */}
             <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:14,flexWrap:'wrap'}}>
               <span style={{fontSize:11,color:'#9CA3AF',fontWeight:600,textTransform:'uppercase',letterSpacing:'0.05em'}}>Trier par</span>
-              {[{id:'marge',l:'Marge vs cible'},{id:'pabrai',l:'Rdt espéré · Pabrai'},{id:'rochon',l:'Rdt espéré · Rochon'},{id:'asym',l:'Asymétrie'},{id:'excess',l:'Excès vs exigé'}].map(({id,l})=>(
+              {[{id:'excess',l:'Excès vs exigé'},{id:'marge',l:'Marge vs cible'},{id:'central',l:'TCAC central'},{id:'pess',l:'TCAC pessimiste'}].map(({id,l})=>(
                 <button key={id} onClick={()=>setWlSort(id)}
                   style={{...s.btn,background:wlSort===id?'#191919':'#F0EFE9',color:wlSort===id?'#fff':'#6B7280',padding:'4px 12px',fontSize:12}}>{l}</button>
               ))}
-              <button onClick={()=>{setHurdleDraft({rf:hurdleCfg.rf,premiums:{...hurdleCfg.premiums}});setHurdlePanel(p=>!p);}}
-                style={{...s.btn,background:hurdlePanel?'#191919':'#F0EFE9',color:hurdlePanel?'#fff':'#6B7280',padding:'4px 12px',fontSize:12}} title="Régler les taux exigés par catégorie">⚙ Taux exigés</button>
+              {rfLive!=null&&<span style={{fontSize:11,color:'#9CA3AF',marginLeft:8}} title="Indicatif : à comparer au sans-risque gravé dans chaque dossier (revue annuelle)">10 ans US : <strong style={{color:'#6B7280'}}>{fmt(rfLive,2)} %</strong></span>}
             </div>
-
-            {/* Panneau d'édition des taux exigés */}
-            {hurdlePanel&&hurdleDraft&&(
-              <div style={{marginBottom:14,padding:'14px 16px',background:'#FAFAF8',border:'1px solid #EEEDE9',borderRadius:10}}>
-                <div style={{fontSize:12,color:'#6B7280',marginBottom:10,lineHeight:1.5}}>
-                  <strong>Taux exigé = sans-risque + prime de catégorie.</strong> Le classement « Excès vs exigé » trie sur <em>rendement espéré − taux exigé</em>. Une défensive peu rémunératrice peut ainsi battre une satellite plus généreuse si elle dépasse mieux sa propre barre.
-                </div>
-                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:12,alignItems:'end'}}>
-                  <div>
-                    <label style={s.lbl}>Sans-risque (réf. US 10 ans) %</label>
-                    <input style={s.inp} type="number" step="any" value={hurdleDraft.rf??''} onChange={e=>setHurdleDraft(d=>({...d,rf:e.target.value===''?'':parseFloat(e.target.value)}))}/>
-                    <div style={{fontSize:10,marginTop:3,display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
-                      {rfLive!=null?(
-                        <>
-                          <span style={{color:'#9CA3AF'}}>10 ans US live : <strong style={{color:'#6B7280'}}>{fmt(rfLive,2)}%</strong></span>
-                          {Math.abs((parseFloat(hurdleDraft.rf)||0)-rfLive)>=0.005&&(
-                            <button onClick={()=>setHurdleDraft(d=>({...d,rf:Math.round(rfLive*100)/100}))}
-                              style={{...s.btn,background:'#EAF2EF',color:'#0D9488',padding:'2px 8px',fontSize:10}}>utiliser</button>
-                          )}
-                        </>
-                      ):<span style={{color:'#D1D5DB'}}>10 ans US live : indisponible</span>}
-                    </div>
-                  </div>
-                  {HURDLE_CATS.map(cat=>(
-                    <div key={cat}>
-                      <label style={{...s.lbl,color:CAT_CLR[cat]}}>Prime {cat} (pts)</label>
-                      <input style={s.inp} type="number" step="any" value={hurdleDraft.premiums?.[cat]??''} onChange={e=>setHurdleDraft(d=>({...d,premiums:{...d.premiums,[cat]:e.target.value===''?'':parseFloat(e.target.value)}}))}/>
-                      <div style={{fontSize:10,color:'#9CA3AF',marginTop:3}}>exigé ≈ {(()=>{const r=parseFloat(hurdleDraft.rf),p=parseFloat(hurdleDraft.premiums?.[cat]);return (isNaN(r)||isNaN(p))?'—':fmt(r+p,1)+'%';})()}</div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{display:'flex',gap:8,marginTop:14}}>
-                  <button style={{...s.btn,background:'#CF6D56',color:'#fff'}} onClick={()=>{const c={rf:num(hurdleDraft.rf),premiums:Object.fromEntries(HURDLE_CATS.map(k=>[k,num(hurdleDraft.premiums?.[k])]))};saveHurdles(c);setHurdlePanel(false);}}>✓ Enregistrer</button>
-                  <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280'}} onClick={()=>setHurdlePanel(false)}>Annuler</button>
-                </div>
-              </div>
-            )}
 
             <div style={{overflowX:'auto',borderRadius:12,border:'1px solid #EEEDE9',background:'#FFFFFF'}}>
               <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
@@ -1639,27 +1568,26 @@ function App(){
                     <th style={{...s.th,width:36}}>#</th>
                     <th style={s.th}>Titre</th><th style={s.th}>Catégorie</th><th style={s.th}>Type</th><th style={s.th}>Cours</th><th style={s.th}>52 sem.</th>
                     <th style={s.th} title="Écart à la moyenne mobile 200 jours">MM200</th>
-                    <th style={s.th}>PC1</th><th style={s.th}>Marge PC1</th>
-                    <th style={s.th}>PC2</th><th style={s.th}>Marge PC2</th>
-                    <th style={s.th}>PC3</th><th style={s.th}>Marge PC3</th>
-                    <th style={s.th}>MoS</th>
-                    <th style={{...s.th,minWidth:96}} title="Rendement espéré annualisé — P : Pabrai (espérance VE) · R : Rochon (central)">Rdt espéré</th>
-                    <th style={s.th} title="Asymétrie : gain attendu (espérance) / perte Bear (non diluée)">Asym.</th>
+                    <th style={s.th} title="Cours auquel le scénario central atteint le rendement exigé (via le multiple d'entrée)">Cible d'entrée</th>
+                    <th style={s.th} title="Décote restante entre le cours et la cible d'entrée">Marge</th>
+                    <th style={{...s.th,minWidth:110}} title={'TCAC '+PONT_H+' ans par scénario — Central (gras), Pessimiste, Optimiste'}>TCAC {PONT_H} ans</th>
+                    <th style={s.th} title="Rendement exigé gravé au dossier (sans-risque + prime, plancher 10 % / 8 % défensif)">Exigé</th>
+                    <th style={s.th} title="Excès = TCAC central − rendement exigé (points)">Δ</th>
+                    <th style={s.th}>Verdict</th>
                     <th style={s.th}></th>
                   </tr>
                 </thead>
                 <tbody>
                   {wlRows.length===0&&(
-                    <tr><td colSpan={18} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>
-                      Aucun titre — ajoutez un titre à suivre via l'Éditeur (enveloppe « Watchlist ») ou renseignez PC1 sur une position détenue
+                    <tr><td colSpan={15} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>
+                      Aucun titre — ajoutez un titre à suivre via l'Éditeur (enveloppe « Watchlist ») ou renseignez un pont de rendement sur une position détenue
                     </td></tr>
                   )}
                   {wlRows.map(({l,mg},idx)=>{
-                    const v=mg.valo;
-                    const tgt=targetIdx(l);
-                    const tgtMos=[null,mg.mos1,mg.mos2,mg.mos3][tgt];
-                    const rowBg=tgtMos==null?'transparent':tgtMos>=0?'#F0FDF4':tgtMos>=-5?'#FFFBEB':'#FEF2F2';
-                    const cells=[[l.pc1,mg.mos1,'pc1_on',1],[mg.pc2,mg.mos2,'pc2_on',2],[mg.pc3,mg.mos3,'pc3_on',3]];
+                    const v=mg.pont;
+                    const vd=(v.ok&&v.verdict)?VERDICT[v.verdict]:null;
+                    const rowBg=vd?vd.bg:'transparent';
+                    const cibleR=v.ok?roundCible(v.cible):null;
                     const isExp=wlExp.has(l.ticker);
                     return(
                       <Fragment key={l.ticker}>
@@ -1690,36 +1618,47 @@ function App(){
                           {mg.ma200pct==null?<span style={{color:'#D1D5DB'}}>—</span>:
                             <span style={{fontWeight:600,color:mg.ma200pct>=0?'#16A34A':'#D97706'}}>{mg.ma200pct>=0?'↑':'↓'} {(mg.ma200pct>=0?'+':'')+fmt(mg.ma200pct,0)}%</span>}
                         </td>
-                        {cells.map(([pc,mos,key,n])=>{
-                          const on=l[key]!==false;
-                          return(
-                            <Fragment key={n}>
-                              <td style={{...s.td,opacity:on?1:0.4}}>
-                                <label style={{display:'flex',alignItems:'center',gap:5,cursor:'pointer'}}>
-                                  <input type="checkbox" checked={on} onChange={e=>setPcFlag(l,key,e.target.checked)}/>
-                                  <span style={{fontWeight:600,color:pc>0?'#191919':'#D1D5DB'}}>{pc>0?fmt(pc):'—'}</span>
-                                </label>
-                              </td>
-                              <td style={{...s.td,opacity:on?1:0.35}}>
-                                <span style={{fontWeight:700,color:mosClr(mos)}}>{mos==null?'—':(mos>=0?'+':'')+fmt(mos)+'%'}</span>
-                                {mos!=null&&<div style={{marginTop:3,height:3,background:'#EEEDE9',borderRadius:2,width:60}}>
-                                  <div style={{width:Math.min(Math.abs(mos),100)+'%',height:'100%',background:mosClr(mos),borderRadius:2}}/>
-                                </div>}
-                              </td>
-                            </Fragment>
-                          );
-                        })}
-                        <td style={{...s.td,color:'#6B7280'}}>{l.mos}%</td>
-                        <td style={{...s.td,minWidth:96}}>
-                          {(v.erP==null&&v.erR==null)?<span style={{color:'#D1D5DB'}}>—</span>:(
-                            <div style={{lineHeight:1.3}}>
-                              {v.erP!=null&&<div style={{fontWeight:700,color:erClr(v.erP),whiteSpace:'nowrap'}} title="Pabrai — espérance VE, total annualisé">P {fmtPct(v.erP)}<span style={{fontWeight:400,color:'#9CA3AF',fontSize:10}}>/an</span></div>}
-                              {v.erR!=null&&<div style={{fontSize:11,color:'#9CA3AF',whiteSpace:'nowrap'}} title="Rochon — central, total annualisé">R {fmtPct(v.erR)}/an</div>}
-                              {mg.excess!=null&&<div style={{fontSize:11,fontWeight:700,color:excessClr(mg.excess),whiteSpace:'nowrap',marginTop:1}} title={'Excès vs taux exigé ('+l.cat+' : '+fmt(mg.rfUsed+mg.premUsed,1)+'%)'}>Δ {fmtPts(mg.excess)}</div>}
+                        <td style={s.td}><span style={{fontWeight:600,color:cibleR!=null?'#191919':'#D1D5DB'}}>{cibleR!=null?fmt(cibleR):'—'}</span></td>
+                        <td style={s.td}>
+                          {(!v.ok||v.marge==null)?<span style={{color:'#D1D5DB'}}>—</span>:(
+                            <div>
+                              <span style={{fontWeight:700,color:mosClr(v.marge)}}>{(v.marge>=0?'+':'')+fmt(v.marge,0)} %</span>
+                              <div style={{marginTop:3,height:3,background:'#EEEDE9',borderRadius:2,width:60}}>
+                                <div style={{width:Math.min(Math.abs(v.marge),100)+'%',height:'100%',background:mosClr(v.marge),borderRadius:2}}/>
+                              </div>
                             </div>
                           )}
                         </td>
-                        <td style={s.td}>{v.hasP?<span style={{fontWeight:700,color:asymClr(v.asym)}}>{fmtAsym(v.asym)}</span>:<span style={{color:'#D1D5DB'}}>—</span>}</td>
+                        <td style={{...s.td,minWidth:110}}>
+                          {!v.ok?<span style={{color:'#D1D5DB'}}>—</span>:(
+                            <div style={{lineHeight:1.3,whiteSpace:'nowrap'}}>
+                              <div style={{fontWeight:700,color:tcacClr(v.scen.central?.tcac,v.hurdle)}} title="Central">{fmtRet(v.scen.central?.tcac)}</div>
+                              <div style={{fontSize:11,color:'#9CA3AF'}} title="Pessimiste / Optimiste">
+                                <span style={{color:'#DC2626'}}>P {v.scen.pess?fmtRet(v.scen.pess.tcac):'—'}</span>
+                                <span style={{margin:'0 5px',color:'#D1D5DB'}}>·</span>
+                                <span style={{color:'#16A34A'}}>O {v.scen.opt?fmtRet(v.scen.opt.tcac):'—'}</span>
+                              </div>
+                            </div>
+                          )}
+                        </td>
+                        <td style={s.td}>
+                          {!v.ok?<span style={{color:'#D1D5DB'}}>—</span>:(
+                            <span style={{whiteSpace:'nowrap'}} title={'Sans-risque '+(v.p.rf!=null?fmt(v.p.rf,2)+' %':'—')+' + prime '+(v.p.prime!=null?fmt(v.p.prime,1)+' pts':'—')+(v.p.defensif?' · plancher 8 % (défensif éligible)':' · plancher 10 %')}>
+                              <span style={{fontWeight:600,color:'#6B7280'}}>{fmtRet(v.hurdle)}</span>
+                              {v.p.defensif&&<span style={{marginLeft:5,fontSize:10,fontWeight:700,color:'#0D9488'}} title="Défensif éligible (5 critères)">D</span>}
+                            </span>
+                          )}
+                        </td>
+                        <td style={s.td}>{(!v.ok||v.excess==null)?<span style={{color:'#D1D5DB'}}>—</span>:<span style={{fontWeight:700,color:excessClr(v.excess),whiteSpace:'nowrap'}}>{fmtPtsH(v.excess)}</span>}</td>
+                        <td style={s.td}>
+                          {vd?(
+                            <span style={{display:'inline-flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}}>
+                              <span style={{padding:'2px 8px',borderRadius:5,fontSize:11,fontWeight:700,color:vd.c,background:vd.c+'14'}}>{vd.l}</span>
+                              {v.stale&&<span style={{color:'#D97706',fontSize:12}} title={'Dossier de '+v.ageM+' mois — revue annuelle due'}>⚠︎</span>}
+                              {v.overHaut&&<span style={{color:'#DC2626',fontSize:11,fontWeight:700}} title="Seuil de sur-extension atteint">↑</span>}
+                            </span>
+                          ):<span style={{color:'#D1D5DB'}} title="Pas de pont de rendement renseigné">—</span>}
+                        </td>
                         <td style={s.td}>
                           {l.wlType==='watchpos'&&(
                             <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 10px',fontSize:11}} title="Modifier dans l'Éditeur"
@@ -1738,8 +1677,8 @@ function App(){
                         </td>
                       </tr>
                       {isExp&&(
-                        <tr><td colSpan={18} style={{padding:'16px 24px',background:'#FAFAF8',borderBottom:'1px solid #EEEDE9'}}>
-                          <WlDeepDive l={l} mg={mg}/>
+                        <tr><td colSpan={15} style={{padding:'16px 24px',background:'#FAFAF8',borderBottom:'1px solid #EEEDE9'}}>
+                          <WlDeepDive l={l} mg={mg} rfLive={rfLive}/>
                         </td></tr>
                       )}
                       </Fragment>
@@ -1748,7 +1687,7 @@ function App(){
                 </tbody>
               </table>
             </div>
-            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>▸ Chevron = détail valorisation · ☑ cible active · MM200 = écart à la moyenne mobile 200 j · Rdt espéré : P = Pabrai, R = Rochon, Δ = excès vs taux exigé de la catégorie · tri « Excès vs exigé » classe par Δ · ⚙ pour régler les taux · 🟢 cible atteinte · 🟡 approche · 🔴 au-delà</div>
+            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>▸ Chevron = table §8 complète, exigé, verdict, conditions de réexamen · MM200 = écart à la moyenne mobile 200 j · TCAC : central en gras, P = pessimiste, O = optimiste (« — » = pas d'option nommée) · D = défensif éligible · Δ = central − exigé · ⚠︎ = dossier de plus de 12 mois · ↑ = seuil de sur-extension atteint · verdict : Achat ↔ central ≥ exigé, sinon Prix insuffisant ; « Passer » gravé passe en bas</div>
           </div>
         )}
 
@@ -2084,7 +2023,7 @@ function App(){
                 <thead><tr style={{background:'#FAFAF8'}}>
                   <th style={{...s.th,width:28}}></th>
                   <th style={s.th}>Titre</th><th style={s.th}>Catégorie</th><th style={s.th}>Première entrée</th>
-                  <th style={s.th}>Sortie</th><th style={s.th}>Durée détenue</th><th style={s.th}>PC1</th><th style={s.th}>MoS</th>
+                  <th style={s.th}>Sortie</th><th style={s.th}>Durée détenue</th><th style={s.th}>Pont</th><th style={s.th}>Exigé</th>
                 </tr></thead>
                 <tbody>
                   {exited.length===0&&<tr><td colSpan={8} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>Aucun titre sorti</td></tr>}
@@ -2102,8 +2041,8 @@ function App(){
                           <td style={{...s.td,color:'#6B7280'}}>{fmtDate(c.firstBuy)}</td>
                           <td style={{...s.td,color:'#DC2626',fontWeight:600}}>{fmtDate(c.last)}</td>
                           <td style={{...s.td,color:'#6B7280'}}>{heldMonths==null?'—':heldMonths+' mois'}</td>
-                          <td style={{...s.td,color:'#6B7280'}}>{p.pc1?fmt(p.pc1):'—'}</td>
-                          <td style={{...s.td,color:'#6B7280'}}>{p.mos}%</td>
+                          <td style={{...s.td,color:'#6B7280',fontSize:12}}>{hasPont(p)?(p.pont.date?fmtDate(p.pont.date):'✓'):'—'}</td>
+                          <td style={{...s.td,color:'#6B7280'}}>{hasPont(p)?fmtRet(pontHurdle(p.pont)):'—'}</td>
                         </tr>
                         {isExp&&(
                           <tr><td colSpan={8} style={{padding:'12px 24px',background:'#FAFAF8',borderBottom:'1px solid #EEEDE9'}}>
@@ -2327,7 +2266,7 @@ function App(){
             {addNew&&(
               <div style={{...s.card,marginBottom:16}}>
                 <div style={{fontWeight:600,marginBottom:12,color:'#6B7280',fontSize:13}}>{editorTab==='watchlist'?'Nouveau titre à suivre (Watchlist)':'Nouvelle position'}</div>
-                <PosForm isNew init={{ticker:'',name:'',env:editorTab==='watchlist'?WL_ENV:'CTO',cat:'Quality Core',secteur:'',themes:[],pc1:0,mos:30,mouvements:[]}} onSave={addPos} onCancel={()=>setAddNew(false)} s={s}/>
+                <PosForm isNew init={{ticker:'',name:'',env:editorTab==='watchlist'?WL_ENV:'CTO',cat:'Quality Core',secteur:'',themes:[],pont:null,mouvements:[]}} onSave={addPos} onCancel={()=>setAddNew(false)} s={s}/>
               </div>
             )}
             <div style={s.card}>
@@ -2336,7 +2275,7 @@ function App(){
                   <thead><tr>
                     <th style={s.th}>Ticker</th><th style={s.th}>Nom</th><th style={s.th}>Env.</th><th style={s.th}>Cat.</th>
                     <th style={s.th}>Qté</th><th style={s.th}>1er achat</th><th style={s.th}>Dern. mvt</th>
-                    <th style={s.th}>PC1</th><th style={s.th}>MoS%</th><th style={s.th}>Actions</th>
+                    <th style={s.th} title="Pont de rendement renseigné (date des données du dossier)">Pont</th><th style={s.th}>Exigé</th><th style={s.th}>Actions</th>
                   </tr></thead>
                   <tbody>
                     {editorList.length===0&&<tr><td colSpan={10} style={{...s.td,textAlign:'center',color:'#9CA3AF',padding:40}}>Aucun titre dans cette catégorie</td></tr>}
@@ -2366,8 +2305,8 @@ function App(){
                             <td style={{...s.td,color:c.qte>0?'#6B7280':'#D1D5DB'}}>{c.qte||0}</td>
                             <td style={{...s.td,color:'#6B7280'}}>{fmtDate(c.firstBuy)}</td>
                             <td style={{...s.td,color:c.lastType==='vente'?'#DC2626':'#6B7280'}}>{fmtDate(c.last)}</td>
-                            <td style={{...s.td,color:'#6B7280'}}>{p.pc1?fmt(p.pc1):'—'}</td>
-                            <td style={{...s.td,color:'#6B7280'}}>{p.mos}%</td>
+                            <td style={{...s.td,color:'#6B7280',fontSize:12}}>{hasPont(p)?(p.pont.date?fmtDate(p.pont.date):'✓'):'—'}</td>
+                            <td style={{...s.td,color:'#6B7280'}}>{hasPont(p)?fmtRet(pontHurdle(p.pont)):'—'}</td>
                             <td style={s.td}>
                               <div style={{display:'flex',gap:4}}>
                                 <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 10px',fontSize:12}} onClick={()=>{setEditId(p.id);setAddNew(false);}}>✏️</button>
