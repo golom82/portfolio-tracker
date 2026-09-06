@@ -299,7 +299,15 @@ function pontMetrics(l, cours){
 const round05  = x => Math.round(x*2)/2;
 const fmtPtsH  = x => x==null?'—':((x>=0?'+':'')+fmt(round05(x),1)+' pts');
 const fmtRet   = x => x==null?'—':(fmt(round05(x),1)+' %');
-const roundCible = x => x==null?null:x>=1000?Math.round(x/10)*10:x>=100?Math.round(x/5)*5:x>=20?Math.round(x):Math.round(x*2)/2;
+const roundCible = x => x==null?null:x>=1000?Math.round(x/10)*10:x>=50?Math.round(x/5)*5:x>=20?Math.round(x):Math.round(x*2)/2;
+// Saisie tolérante des nombres du pont : accepte « +1,5 », « −2,5 » (moins typographique), « 4,78 % », espaces → nombre ou null
+const pontNum = x => {
+  if(x==null) return null;
+  if(typeof x==='number') return isNaN(x)?null:x;
+  const t=String(x).replace(/\u2212/g,'-').replace(/,/g,'.').replace(/[+\s%×x]/gi,'').trim();
+  if(t===''||t==='-'||t==='.') return null;
+  const n=parseFloat(t); return isNaN(n)?null:n;
+};
 const tcacClr  = (t,h) => t==null?'#9CA3AF':(h!=null&&t>=h)?'#16A34A':t>=0?'#D97706':'#DC2626';
 const excessClr = x => x==null?'#9CA3AF':x>=0?'#16A34A':'#DC2626';
 const VERDICT  = {achat:{l:'Achat',c:'#16A34A',bg:'#F0FDF4'},insuffisant:{l:'Prix insuffisant',c:'#D97706',bg:'transparent'},passer:{l:'Passer',c:'#9CA3AF',bg:'#F5F5F4'}};
@@ -531,14 +539,17 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
         const pu=patch=>upd('pont',{...p,...patch});
         const sc=k=>(p.scen&&p.scen[k])||{};
         const psc=(k,comp,v)=>pu({scen:{...(p.scen||{}),[k]:{...sc(k),[comp]:v}}});
-        const nv=e=>e.target.value===''?'':parseFloat(e.target.value);
+        const nv=e=>e.target.value;                                   // brut pendant la saisie ; nettoyé (pontNum) à l'enregistrement
+        const pn=x=>pontNum(x);
         const cell={...s.inp,textAlign:'right',padding:'4px 6px',fontSize:12};
-        const hur=pontHurdle({rf:parseFloat(p.rf),prime:parseFloat(p.prime),defensif:!!p.defensif});
-        const dpsF=parseFloat(p.dps)||0;
-        const cib=pontCible({metric_ps:parseFloat(p.metric_ps),rf:parseFloat(p.rf),prime:parseFloat(p.prime),defensif:!!p.defensif,dps:dpsF,
-          scen:{central:Object.fromEntries([...PONT_COMPS.map(c=>c.k),'mult'].map(k=>[k,parseFloat(sc('central')[k])]))}});
-        const anyC=PONT_COMPS.some(c=>c.k!=='div'&&sc('central')[c.k]!==''&&sc('central')[c.k]!=null);
-        const opsC=anyC?['croissance','marge','actions'].reduce((a,k)=>a+(parseFloat(sc('central')[k])||0),0):NaN;
+        const hur=pontHurdle({rf:pn(p.rf),prime:pn(p.prime),defensif:!!p.defensif});
+        const dpsF=pn(p.dps)||0;
+        const cib=pontCible({metric_ps:pn(p.metric_ps),rf:pn(p.rf),prime:pn(p.prime),defensif:!!p.defensif,dps:dpsF,
+          scen:{central:Object.fromEntries([...PONT_COMPS.map(c=>c.k),'mult'].map(k=>[k,pn(sc('central')[k])]))}});
+        const anyC=['croissance','marge','actions'].some(k=>pn(sc('central')[k])!=null);
+        const opsC=anyC?['croissance','marge','actions'].reduce((a,k)=>a+(pn(sc('central')[k])||0),0):NaN;
+        const bad=x=>(x!=null&&String(x).trim()!==''&&pn(x)==null);   // texte non interprétable → bordure rouge
+        const cellStyle=x=>bad(x)?{...cell,borderColor:'#DC2626',color:'#DC2626'}:cell;
         return (
         <div style={{marginTop:14,padding:'12px 14px',background:'#FAFAF8',border:'1px solid #EEEDE9',borderRadius:8}}>
           <div style={{fontSize:11,color:'#9CA3AF',marginBottom:2,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.05em'}}>Pont de rendement — dossier maître §8-§9 <span style={{textTransform:'none',fontWeight:400}}>(facultatif)</span></div>
@@ -547,11 +558,11 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
             <div><label style={s.lbl}>Date des données (§9)</label><input style={s.inp} type="date" value={p.date||''} onChange={e=>pu({date:e.target.value})}/></div>
             <div><label style={s.lbl}>Métrique du multiple</label>
               <select style={s.inp} value={p.metric_kind||PONT_METRICS[0]} onChange={e=>pu({metric_kind:e.target.value})}>{PONT_METRICS.map(x=><option key={x}>{x}</option>)}</select></div>
-            <div><label style={s.lbl}>Métrique par action</label><input style={s.inp} type="number" step="any" value={p.metric_ps??''} onChange={e=>pu({metric_ps:nv(e)})}/></div>
-            <div><label style={s.lbl}>Sans-risque gravé %</label><input style={s.inp} type="number" step="any" value={p.rf??''} onChange={e=>pu({rf:nv(e)})}/></div>
-            <div><label style={s.lbl}>Prime de superformance (pts)</label><input style={s.inp} type="number" step="any" value={p.prime??''} onChange={e=>pu({prime:nv(e)})}/></div>
-            <div><label style={s.lbl}>Seuil de sur-extension (haut)</label><input style={s.inp} type="number" step="any" value={p.seuil_haut??''} onChange={e=>pu({seuil_haut:nv(e)})}/></div>
-            <div><label style={s.lbl} title="Dividende annuel par action (devise locale), 0 ou vide si aucun. Le rendement (1D) est recalculé au cours et au prix cible.">Dividende par action</label><input style={s.inp} type="number" step="any" value={p.dps??''} onChange={e=>pu({dps:nv(e)})}/></div>
+            <div><label style={s.lbl}>Métrique par action</label><input style={bad(p.metric_ps)?{...s.inp,borderColor:'#DC2626',color:'#DC2626'}:s.inp} type="text" inputMode="decimal" value={p.metric_ps??''} onChange={e=>pu({metric_ps:nv(e)})}/></div>
+            <div><label style={s.lbl}>Sans-risque gravé %</label><input style={bad(p.rf)?{...s.inp,borderColor:'#DC2626',color:'#DC2626'}:s.inp} type="text" inputMode="decimal" value={p.rf??''} onChange={e=>pu({rf:nv(e)})}/></div>
+            <div><label style={s.lbl}>Prime de superformance (pts)</label><input style={bad(p.prime)?{...s.inp,borderColor:'#DC2626',color:'#DC2626'}:s.inp} type="text" inputMode="decimal" value={p.prime??''} onChange={e=>pu({prime:nv(e)})}/></div>
+            <div><label style={s.lbl}>Seuil de sur-extension (haut)</label><input style={bad(p.seuil_haut)?{...s.inp,borderColor:'#DC2626',color:'#DC2626'}:s.inp} type="text" inputMode="decimal" value={p.seuil_haut??''} onChange={e=>pu({seuil_haut:nv(e)})}/></div>
+            <div><label style={s.lbl} title="Dividende annuel par action (devise locale), 0 ou vide si aucun. Le rendement (1D) est recalculé au cours et au prix cible.">Dividende par action</label><input style={bad(p.dps)?{...s.inp,borderColor:'#DC2626',color:'#DC2626'}:s.inp} type="text" inputMode="decimal" value={p.dps??''} onChange={e=>pu({dps:nv(e)})}/></div>
           </div>
           <div style={{display:'flex',gap:18,flexWrap:'wrap',marginBottom:10,fontSize:12}}>
             <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',color:'#0D9488'}}><input type="checkbox" checked={!!p.defensif} onChange={e=>pu({defensif:e.target.checked})}/>Défensif éligible (5 critères) → plancher {PONT_FLOOR_DEF} %</label>
@@ -566,13 +577,13 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
               {[...PONT_COMPS.filter(c=>c.k!=='div'),{k:'mult',l:'Multiple de sortie (×)'}].map(comp=>(
                 <tr key={comp.k}>
                   <td style={{padding:'2px 10px 2px 0',color:'#6B7280',whiteSpace:'nowrap'}}>{comp.l}</td>
-                  {PONT_SCENS.map(x=><td key={x.k} style={{padding:'2px 6px'}}><input style={cell} type="number" step="any" value={sc(x.k)[comp.k]??''} onChange={e=>psc(x.k,comp.k,nv(e))}/></td>)}
+                  {PONT_SCENS.map(x=><td key={x.k} style={{padding:'2px 6px'}}><input style={cellStyle(sc(x.k)[comp.k])} type="text" inputMode="decimal" value={sc(x.k)[comp.k]??''} onChange={e=>psc(x.k,comp.k,nv(e))}/></td>)}
                 </tr>
               ))}
             </tbody>
           </table>
           <div style={{fontSize:11,color:'#9CA3AF',marginTop:8,lineHeight:1.6}}>
-            Exigé : <strong style={{color:'#6B7280'}}>{hur==null?'—':fmtRet(hur)}</strong>
+            Exigé : <strong style={{color:'#6B7280'}}>{hur==null?'—':fmtRet(hur)}</strong>{[p.metric_ps,p.rf,p.prime,p.seuil_haut,p.dps,...PONT_SCENS.flatMap(x=>[...PONT_COMPS.map(c=>c.k),'mult'].map(k=>sc(x.k)[k]))].some(bad)&&<strong style={{color:'#DC2626',marginLeft:8}}>valeur illisible en rouge — corrige avant d'enregistrer</strong>}
             {isNaN(opsC)?null:<span> · central hors multiple et dividende : <strong style={{color:'#6B7280'}}>{fmtPtsH(opsC)}</strong></span>}
             {cib!=null&&<span> · cible d'entrée ≈ <strong style={{color:'#6B7280'}}>{fmt(roundCible(cib))}</strong>{dpsF>0&&<span> (dividende {fmt(dpsF/cib*100,1)} % à la cible)</span>}</span>}
           </div>
@@ -589,9 +600,9 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
           const vnum=x=>(x===''||x==null||isNaN(parseFloat(x)))?null:parseFloat(x);
           const cleanPont=raw=>{
             if(!raw) return null;
-            const scn=k=>{const sc=raw.scen?.[k]||{};const o={};PONT_COMPS.forEach(c=>o[c.k]=vnum(sc[c.k]));o.mult=vnum(sc.mult);return o;};
-            const out={date:raw.date||null,metric_kind:raw.metric_kind||PONT_METRICS[0],metric_ps:vnum(raw.metric_ps),rf:vnum(raw.rf),prime:vnum(raw.prime),
-              defensif:!!raw.defensif,passer:!!raw.passer,seuil_haut:vnum(raw.seuil_haut),dps:vnum(raw.dps),scen:{pess:scn('pess'),central:scn('central'),opt:scn('opt')}};
+            const scn=k=>{const sc=raw.scen?.[k]||{};const o={};PONT_COMPS.forEach(c=>o[c.k]=pontNum(sc[c.k]));o.mult=pontNum(sc.mult);return o;};
+            const out={date:raw.date||null,metric_kind:raw.metric_kind||PONT_METRICS[0],metric_ps:pontNum(raw.metric_ps),rf:pontNum(raw.rf),prime:pontNum(raw.prime),
+              defensif:!!raw.defensif,passer:!!raw.passer,seuil_haut:pontNum(raw.seuil_haut),dps:pontNum(raw.dps),scen:{pess:scn('pess'),central:scn('central'),opt:scn('opt')}};
             if(out.scen.opt.mult==null&&PONT_COMPS.every(c=>out.scen.opt[c.k]==null)) out.scen.opt=null;   // Optimiste absent
             const empty=out.metric_ps==null&&out.rf==null&&out.prime==null&&out.scen.central.mult==null;
             return empty?null:out;
