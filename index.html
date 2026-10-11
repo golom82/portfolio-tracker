@@ -62,11 +62,25 @@ const { useState, useEffect, Fragment } = React;
 const CATS    = ['Défensif','Quality Core','Quality Satellite','Outsider'];
 const ENVS    = ['PEA','CTO','PER'];
 const CAT_CLR = {'Défensif':'#0D9488','Quality Core':'#2563EB','Quality Satellite':'#7C3AED','Outsider':'#D97706','Liquidités':'#64748B'};
-// ── Pont de rendement (méthode dossier maître, session c2) ──
-// Rendement exigé = sans-risque gravé (US 10 ans, daté) + prime de superformance, arrondi défavorable au demi-point,
-// jamais sous 10 % (8 % si titre défensif éligible aux cinq critères). Gravé PAR TITRE dans le dossier, révisé en revue annuelle.
-const PONT_H = 10;                                   // horizon du pont (années)
-const PONT_FLOOR = 10, PONT_FLOOR_DEF = 8;           // planchers du rendement exigé (%)
+// ── Pont de rendement (méthode V2.1 — methode_pipeline.md §7, session c2) ──
+// Horizon unique de CINQ ans. Rendement exigé = max(taux sans risque millésimé ; 3 %) + prime de RÔLE
+// (+5 défensif / +7 cœur / +9 satellite), arrondi défavorable au demi-point. Le taux (Treasury US 5 ans) est
+// une valeur par année civile, fixée en janvier dans methode_pipeline.md §7.3 — jamais un cours spot.
+// Le rôle se gagne sur critères (jamais sur le prix), se grave en c2 Phase 0 et ne bouge qu'en revue annuelle.
+// « Passer » n'est plus une issue du pont : tranché en b2, il se grave comme rôle sans pont.
+const PONT_H = 5;                                    // horizon du pont (années)
+const PONT_RF_FLOOR = 3;                             // plancher du taux sans risque (%) — remplace les planchers d'exigence 8/10 %
+const PONT_MILLESIMES = {2026:5.0};                  // Treasury US 5 ans retenu par millésime (methode_pipeline.md §7.3) — une ligne par an
+const PONT_MILLESIME_DEF = Math.max(...Object.keys(PONT_MILLESIMES).map(Number));
+const PONT_ROLES = [
+  {k:'defensif', l:'Défensif', s:'D', prime:5,    c:'#0D9488'},
+  {k:'coeur',    l:'Cœur',     s:'C', prime:7,    c:'#2563EB'},
+  {k:'satellite',l:'Satellite',s:'S', prime:9,    c:'#7C3AED'},
+  {k:'passer',   l:'Passer',   s:'—', prime:null, c:'#9CA3AF'},   // décision b2 : pas de pont
+];
+const PONT_ROLE = Object.fromEntries(PONT_ROLES.map(r=>[r.k,r]));
+// Correspondance indicative catégorie d'allocation → rôle attendu (simple alerte de cohérence, jamais une dérivation)
+const CAT_ROLE = {'Défensif':'defensif','Quality Core':'coeur','Quality Satellite':'satellite'};
 const PONT_METRICS = ['BPA dilué','FCF/action','OCF/action','ANR/action'];   // métrique du multiple (choix gravé au dossier)
 const PONT_COMPS = [{k:'croissance',l:'Croissance CA'},{k:'marge',l:'Effet marge'},{k:'actions',l:'Réduction actions'},{k:'div',l:'Dividende'}];
 const PONT_SCENS = [{k:'pess',l:'Pessimiste',c:'#DC2626'},{k:'central',l:'Central',c:'#191919'},{k:'opt',l:'Optimiste',c:'#16A34A'}];
@@ -193,7 +207,7 @@ function PerfDot({tri,holdM,result,masked}){
 
 const CASH_TYPES = ['apport','retrait','dividende']; // apport/dividende = +cash, retrait = −cash
 const FX_TICKERS = ['EURUSD=X','EURCAD=X','EURDKK=X'];
-const RF_TICKER  = '^TNX';  // CBOE US 10 ans — affiché à titre indicatif (écart vs sans-risque gravé), jamais appliqué
+const RF_TICKER  = '^FVX';  // CBOE US 5 ans — affiché à titre indicatif (écart vs millésime, bande morte ±0,5 pt), jamais appliqué
 
 // Seed — catégories migrées vers le nouveau schéma. Mouvements vides : à renseigner via l'éditeur.
 const SEED = [
@@ -229,27 +243,49 @@ const fmtQte1 = n => n==null?'—':Number(n).toLocaleString('fr-FR',{maximumFrac
 // Couleur marge : vert si cible atteinte/dépassée (≥0), jaune en zone d'approche (−5..0), rouge au-delà
 const mosClr = n => n==null?'#9CA3AF':n>=0?'#16A34A':n>=-5?'#D97706':'#DC2626';
 
-// ── Module PONT DE RENDEMENT (watchlist) — méthode dossier maître (c2) ─────
+// ── Module PONT DE RENDEMENT (watchlist) — méthode V2.1 (c2, cinq ans) ─────
 // Paramètres FIGÉS, recopiés de la table §8 du dossier (en DEVISE LOCALE du titre) ; le SEUL élément live est le cours.
-//  • 1A-1D (croissance CA, effet marge, réduction d'actions, dividende) : indépendants du cours → points figés.
-//  • 1E (normalisation du multiple) : dépend du cours → recalculé : (M_sortie × métrique/action ÷ cours)^(1/10) − 1.
+//  • 1A-1C (croissance CA, effet marge, réduction d'actions) : indépendants du cours → points figés.
+//  • 1E (normalisation du multiple) : dépend du cours → recalculé : (M_sortie × métrique/action ÷ cours)^(1/5) − 1.
+//    Sur cinq ans, il pèse deux fois plus qu'à dix, dans les deux sens — c'est voulu (methode_pipeline.md §7.1).
 //  • 1D (dividende) : UNE seule convention — dividende par action (dps, 0 si aucun) ÷ cours, recalculé au cours du jour
-//    et au prix cible, dans les trois scénarios (ex. Rollins : 0,73/37,5 = 2 pts au cours, 0,73/30 = 2,5 pts à la cible).
-//    La ligne « Dividende » de la table §8 n'est PAS saisie : elle est dérivée.
-//  • TCAC 10 ans du scénario = 1A+1B+1C+1D + 1E (sommation, convention du dossier).
-//  • Cible d'entrée = cours auquel le scénario CENTRAL atteint le rendement exigé, toutes autres hypothèses inchangées
-//    (l'ajustement passe par le multiple d'entrée) : sans dividende, forme fermée P* = M_sortie × métrique ÷ (1 + exigé − ops)^10 ;
-//    avec dividende, bissection (1D dépend de P).
-//  • Verdict mécanique : central ≥ exigé → Achat ; sinon Prix insuffisant (cible P*) ; « Passer » gravé prime sur tout.
+//    et au prix cible, dans les trois scénarios. La ligne « Dividende » de la table §8 n'est PAS saisie : elle est dérivée.
+//  • TCAC 5 ans du scénario = 1A+1B+1C+1D + 1E (sommation, convention du dossier).
+//  • Rendement exigé = max(taux millésimé ; 3 %) + prime de rôle, arrondi supérieur au demi-point. Le taux et le rôle
+//    sont gravés par titre (millésime + rôle) ; la prime découle du rôle, elle n'est pas saisie.
+//  • Cible d'entrée = cours auquel le scénario CENTRAL atteint le rendement exigé, 1A-1C figées, 1D et 1E recalculées à P :
+//    sans dividende, forme fermée P* = M_sortie × métrique ÷ (1 + exigé − ops)^5 ; avec dividende, bissection.
+//  • Verdict mécanique : central ≥ exigé → Achat ; sinon Prix insuffisant (cible P*). Rôle « Passer » = pas de pont (b2).
+//  • Un pont gravé sous l'ancienne méthode (clés prime/defensif/passer, pas de rôle) est affiché « V2 — à migrer » : ni TCAC
+//    ni verdict (un pont 10 ans et une exigence V2 donneraient un faux verdict à 5 ans). La pré-migration (bouton de
+//    l'Éditeur) applique rôle + millésime en conservant 1A-1C, DPA, multiples et seuil ; la base LTM attend le relevé T3.
 // Aucune probabilité, aucune espérance : trois scénarios ancrés dans la thèse (l'Optimiste peut être ABSENT → « — »).
 const pontOf  = l => (l&&l.pont&&typeof l.pont==='object')?l.pont:null;
-const hasPont = l => { const p=pontOf(l); return !!(p&&num(p.metric_ps)>0&&p.scen&&p.scen.central&&num(p.scen.central.mult)>0); };
-// Rendement exigé (%) : rf + prime, arrondi SUPÉRIEUR au demi-point (défavorable au titre), puis plancher 10 % / 8 % (défensif)
+const pontHasData = p => !!(p&&num(p.metric_ps)>0&&p.scen&&p.scen.central&&num(p.scen.central.mult)>0);
+const pontIsLegacy = p => !!(p&&(p.prime!=null||('defensif' in p)||('passer' in p)));   // clés d'exigence V2 présentes → seule la pré-migration les retire
+// État d'un pont : 'ok' (V2.1 calculable) · 'passer' (rôle gravé, pas de pont) · 'legacy' (V2 à migrer ou rôle manquant) · 'none'
+function pontState(l){
+  const p=pontOf(l); if(!p) return 'none';
+  if(p.role==='passer') return 'passer';
+  if(!pontHasData(p)) return 'none';
+  return PONT_ROLE[p.role]&&pontHurdle(p)!=null?'ok':'legacy';
+}
+const hasPont = l => pontState(l)==='ok';
+const PONT_STATE_RANK = {ok:0,legacy:1,none:2,passer:3};   // ordre de tri : les non calculables descendent
+// Taux sans risque gravé (%) : valeur stockée, sinon celle du millésime
+const pontRf = p => { const r=num(p?.rf); if(r>0) return r; const m=PONT_MILLESIMES[p?.millesime]; return m>0?m:null; };
+// Rendement exigé (%) : max(taux ; 3) + prime de rôle, arrondi SUPÉRIEUR au demi-point (défavorable au titre)
 function pontHurdle(p){
-  const rf=num(p?.rf), prime=num(p?.prime);
-  if(!(rf>0||prime>0)) return null;
-  const raw=Math.ceil((rf+prime)*2-1e-9)/2;
-  return Math.max(raw, p?.defensif?PONT_FLOOR_DEF:PONT_FLOOR);
+  const role=PONT_ROLE[p?.role]; if(!role||role.prime==null) return null;
+  const rf=pontRf(p); if(rf==null) return null;
+  return Math.ceil((Math.max(rf,PONT_RF_FLOOR)+role.prime)*2-1e-9)/2;
+}
+// Libellé court de l'exigé pour les tables de l'Éditeur
+function pontExigeLabel(p){
+  if(!p) return '—';
+  if(p.role==='passer') return 'Passer';
+  if(!pontHasData(p)) return '—';
+  const h=pontHurdle(p); return h!=null?fmtRet(h):PONT_ROLE[p.role]?'millésime ?':'V2 · à migrer';
 }
 // Rendement du dividende en points : dividende par action ÷ cours (0 si aucun dividende)
 const pontDiv = (sc,dps,cours) => (dps>0&&cours>0)?dps/cours*100:0;
@@ -273,7 +309,8 @@ function pontCible(p){
   return (lo+hi)/2;
 }
 function pontMetrics(l, cours){
-  if(!hasPont(l)) return {ok:false};
+  const state=pontState(l);
+  if(state!=='ok') return {ok:false,state,p:pontOf(l)};
   const p=pontOf(l), m=num(p.metric_ps), dps=num(p.dps);
   const hurdle=pontHurdle(p);                                                                          // %
   const multEff = sc => (sc&&cours>0&&num(sc.mult)>0)?(Math.pow(num(sc.mult)*m/cours,1/PONT_H)-1)*100:null;  // 1E live (points)
@@ -289,14 +326,16 @@ function pontMetrics(l, cours){
   const cible=pontCible(p);
   const marge=(cible>0&&cours>0)?((cible-cours)/cible)*100:null;      // décote restante vers la cible (%)
   const excess=(c&&c.tcac!=null&&hurdle!=null)?c.tcac-hurdle:null;   // points
-  const verdict=p.passer?'passer':(excess==null?null:excess>=0?'achat':'insuffisant');
+  const verdict=excess==null?null:excess>=0?'achat':'insuffisant';
   const ageM=monthsElapsed(p.date);
   const seuilHaut=num(p.seuil_haut)>0?num(p.seuil_haut):null;
-  return {ok:true,p,m,dps,divLive:dps>0,hurdle,entryMult,scen,cible,marge,excess,verdict,ageM,stale:ageM!=null&&ageM>=12,seuilHaut,
-          overHaut:seuilHaut!=null&&cours>0&&cours>=seuilHaut};
+  const role=PONT_ROLE[p.role], rf=pontRf(p);
+  const catRole=CAT_ROLE[l.cat], roleMismatch=!!(catRole&&catRole!==p.role);   // rôle gravé ≠ catégorie d'allocation (alerte seulement)
+  return {ok:true,state,p,m,dps,divLive:dps>0,hurdle,role,rf,entryMult,scen,cible,marge,excess,verdict,ageM,stale:ageM!=null&&ageM>=12,seuilHaut,
+          overHaut:seuilHaut!=null&&cours>0&&cours>=seuilHaut,premigre:!!p.premigre,roleMismatch};
 }
 // Fausse précision interdite : rendements et composantes au demi-point, cible au chiffre rond
-const round05  = x => Math.round(x*2)/2;
+const round05  = x => (Math.round(x*2)/2)||0;   // ||0 : neutralise le −0 (sinon « −0,0 % »)
 const fmtPtsH  = x => x==null?'—':((x>=0?'+':'')+fmt(round05(x),1)+' pts');
 const fmtRet   = x => x==null?'—':(fmt(round05(x),1)+' %');
 const roundCible = x => x==null?null:x>=1000?Math.round(x/10)*10:x>=50?Math.round(x/5)*5:x>=20?Math.round(x):Math.round(x*2)/2;
@@ -310,7 +349,8 @@ const pontNum = x => {
 };
 const tcacClr  = (t,h) => t==null?'#9CA3AF':(h!=null&&t>=h)?'#16A34A':t>=0?'#D97706':'#DC2626';
 const excessClr = x => x==null?'#9CA3AF':x>=0?'#16A34A':'#DC2626';
-const VERDICT  = {achat:{l:'Achat',c:'#16A34A',bg:'#F0FDF4'},insuffisant:{l:'Prix insuffisant',c:'#D97706',bg:'transparent'},passer:{l:'Passer',c:'#9CA3AF',bg:'#F5F5F4'}};
+const VERDICT  = {achat:{l:'Achat',c:'#16A34A',bg:'#F0FDF4'},insuffisant:{l:'Prix insuffisant',c:'#D97706',bg:'transparent'},
+                  passer:{l:'Passer',c:'#9CA3AF',bg:'#F5F5F4'},legacy:{l:'V2 · à migrer',c:'#D97706',bg:'#FFFBEB'}};
 
 // Mois pleins (échus) écoulés depuis une date 'YYYY-MM-DD'
 function monthsElapsed(dateStr){
@@ -542,10 +582,28 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
         const nv=e=>e.target.value;                                   // brut pendant la saisie ; nettoyé (pontNum) à l'enregistrement
         const pn=x=>pontNum(x);
         const cell={...s.inp,textAlign:'right',padding:'4px 6px',fontSize:12};
-        const hur=pontHurdle({rf:pn(p.rf),prime:pn(p.prime),defensif:!!p.defensif});
+        const legacy=pontIsLegacy(p);                                   // pont V2 (10 ans, rf + prime) : à pré-migrer avant tout calcul
+        const isPasser=p.role==='passer';
+        const mil=p.millesime!=null?Number(p.millesime):null;
+        const rfMil=mil!=null?PONT_MILLESIMES[mil]:null;
+        const hur=legacy?null:pontHurdle({role:p.role,millesime:mil,rf:rfMil});
         const dpsF=pn(p.dps)||0;
-        const cib=pontCible({metric_ps:pn(p.metric_ps),rf:pn(p.rf),prime:pn(p.prime),defensif:!!p.defensif,dps:dpsF,
+        const cib=legacy?null:pontCible({metric_ps:pn(p.metric_ps),role:p.role,millesime:mil,rf:rfMil,dps:dpsF,
           scen:{central:Object.fromEntries([...PONT_COMPS.map(c=>c.k),'mult'].map(k=>[k,pn(sc('central')[k])]))}});
+        const catRole=CAT_ROLE[f.cat], mismatch=!!(catRole&&PONT_ROLE[p.role]&&p.role!=='passer'&&catRole!==p.role);
+        // Pré-migration V2 → V2.1 : rôle choisi + millésime courant ; 1A-1C, DPA, multiples, seuil, date et métrique conservés.
+        const premigrer=()=>{ if(!PONT_ROLE[p.role]) return;
+          const {prime,defensif,passer,...rest}=p;
+          upd('pont',{...rest,millesime:PONT_MILLESIME_DEF,rf:PONT_MILLESIMES[PONT_MILLESIME_DEF],premigre:p.role!=='passer'}); };
+        const rolePills=(
+          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+            {PONT_ROLES.map(r=>{const on=p.role===r.k;return(
+              <label key={r.k} style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',padding:'5px 11px',borderRadius:6,border:'1px solid '+(on?r.c:'#E0DED8'),background:on?r.c+'14':'#FFF',fontSize:12}}>
+                <input type="checkbox" checked={on} onChange={e=>pu({role:e.target.checked?r.k:null})}/>
+                <span style={{fontWeight:600,color:on?r.c:'#6B7280'}}>{r.l}</span>
+                <span style={{fontSize:10,color:'#9CA3AF'}}>{r.prime!=null?'+'+r.prime:'b2'}</span>
+              </label>);})}
+          </div>);
         const anyC=['croissance','marge','actions'].some(k=>pn(sc('central')[k])!=null);
         const opsC=anyC?['croissance','marge','actions'].reduce((a,k)=>a+(pn(sc('central')[k])||0),0):NaN;
         const bad=x=>(x!=null&&String(x).trim()!==''&&pn(x)==null);   // texte non interprétable → bordure rouge
@@ -553,21 +611,40 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
         return (
         <div style={{marginTop:14,padding:'12px 14px',background:'#FAFAF8',border:'1px solid #EEEDE9',borderRadius:8}}>
           <div style={{fontSize:11,color:'#9CA3AF',marginBottom:2,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.05em'}}>Pont de rendement — dossier maître §8-§9 <span style={{textTransform:'none',fontWeight:400}}>(facultatif)</span></div>
-          <div style={{fontSize:11,color:'#9CA3AF',marginBottom:10,lineHeight:1.5}}>Recopie de la table §8 (points, TCAC {PONT_H} ans) et du rendement exigé gravé en §9, en <strong>devise locale</strong>. Les lignes « multiple » et « dividende » se recalculent au cours (dividende = DPA ÷ cours, ne pas saisir la ligne de la table) ; le reste est gravé. Optimiste vide = pas d'option nommée (affiché « — »).</div>
+          <div style={{fontSize:11,color:'#9CA3AF',marginBottom:10,lineHeight:1.5}}>Méthode V2.1 : table §8 (points, TCAC {PONT_H} ans), rôle et millésime gravés en §9, en <strong>devise locale</strong>. Exigé = max(taux millésimé ; {PONT_RF_FLOOR} %) + prime de rôle. Les lignes « multiple » et « dividende » se recalculent au cours (dividende = DPA ÷ cours, ne pas saisir la ligne de la table) ; le reste est gravé. Optimiste vide = pas d'option nommée (affiché « — »).</div>
+          {legacy&&(
+            <div style={{marginBottom:12,padding:'10px 12px',background:'#FFFBEB',border:'1px solid #FDE68A',borderRadius:8}}>
+              <div style={{fontSize:12,fontWeight:700,color:'#B45309',marginBottom:4}}>Pont V2 (10 ans · exigé {p.rf!=null?fmt(pn(p.rf),1)+' %':'—'} + {p.prime!=null?fmt(pn(p.prime),1)+' pts':'—'}{p.defensif?' · défensif':''}{p.passer?' · « passer »':''}) — à pré-migrer en V2.1</div>
+              <div style={{fontSize:11,color:'#92400E',lineHeight:1.5,marginBottom:8}}>Choisis le rôle gravé (classification §7.5) puis pré-migre : rôle + millésime {PONT_MILLESIME_DEF} ({fmt(PONT_MILLESIMES[PONT_MILLESIME_DEF],1)} %) sont appliqués, 1A-1C, DPA, multiples, seuil et métrique conservés. La base LTM (métrique par action, date) reste celle du dossier jusqu'au relevé T3. Tant que ce n'est pas fait, la watchlist n'affiche ni TCAC ni verdict pour ce titre.</div>
+              {rolePills}
+              <button style={{...s.btn,background:PONT_ROLE[p.role]?'#B45309':'#F0EFE9',color:PONT_ROLE[p.role]?'#fff':'#9CA3AF',marginTop:10,fontSize:12,padding:'5px 14px'}} disabled={!PONT_ROLE[p.role]} onClick={premigrer}>⟳ Pré-migrer en V2.1</button>
+            </div>
+          )}
+          {!legacy&&(
+            <div style={{marginBottom:10}}>
+              <label style={s.lbl}>Rôle gravé (c2 Phase 0 — critères, jamais le prix) {mismatch&&<span style={{color:'#D97706',fontWeight:700}} title={'Catégorie d\u2019allocation « '+f.cat+' » ≠ rôle gravé — à instruire en revue annuelle'}>⚠ ≠ catégorie {f.cat}</span>}</label>
+              {rolePills}
+            </div>
+          )}
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(130px,1fr))',gap:12,marginBottom:10}}>
             <div><label style={s.lbl}>Date des données (§9)</label><input style={s.inp} type="date" value={p.date||''} onChange={e=>pu({date:e.target.value})}/></div>
             <div><label style={s.lbl}>Métrique du multiple</label>
               <select style={s.inp} value={p.metric_kind||PONT_METRICS[0]} onChange={e=>pu({metric_kind:e.target.value})}>{PONT_METRICS.map(x=><option key={x}>{x}</option>)}</select></div>
             <div><label style={s.lbl}>Métrique par action</label><input style={bad(p.metric_ps)?{...s.inp,borderColor:'#DC2626',color:'#DC2626'}:s.inp} type="text" inputMode="decimal" value={p.metric_ps??''} onChange={e=>pu({metric_ps:nv(e)})}/></div>
-            <div><label style={s.lbl}>Sans-risque gravé %</label><input style={bad(p.rf)?{...s.inp,borderColor:'#DC2626',color:'#DC2626'}:s.inp} type="text" inputMode="decimal" value={p.rf??''} onChange={e=>pu({rf:nv(e)})}/></div>
-            <div><label style={s.lbl}>Prime de superformance (pts)</label><input style={bad(p.prime)?{...s.inp,borderColor:'#DC2626',color:'#DC2626'}:s.inp} type="text" inputMode="decimal" value={p.prime??''} onChange={e=>pu({prime:nv(e)})}/></div>
+            {!legacy&&<div><label style={s.lbl} title="Treasury US 5 ans, une valeur par année civile (methode_pipeline.md §7.3). Jamais un taux spot.">Millésime du taux</label>
+              <select style={s.inp} value={mil??''} onChange={e=>{const y=e.target.value===''?null:Number(e.target.value);pu({millesime:y,rf:y!=null?PONT_MILLESIMES[y]:null});}}>
+                <option value="">— choisir —</option>
+                {Object.keys(PONT_MILLESIMES).map(Number).sort((a,b)=>b-a).map(y=><option key={y} value={y}>{y} · {fmt(PONT_MILLESIMES[y],1)} %</option>)}
+              </select></div>}
             <div><label style={s.lbl}>Seuil de sur-extension (haut)</label><input style={bad(p.seuil_haut)?{...s.inp,borderColor:'#DC2626',color:'#DC2626'}:s.inp} type="text" inputMode="decimal" value={p.seuil_haut??''} onChange={e=>pu({seuil_haut:nv(e)})}/></div>
             <div><label style={s.lbl} title="Dividende annuel par action (devise locale), 0 ou vide si aucun. Le rendement (1D) est recalculé au cours et au prix cible.">Dividende par action</label><input style={bad(p.dps)?{...s.inp,borderColor:'#DC2626',color:'#DC2626'}:s.inp} type="text" inputMode="decimal" value={p.dps??''} onChange={e=>pu({dps:nv(e)})}/></div>
           </div>
-          <div style={{display:'flex',gap:18,flexWrap:'wrap',marginBottom:10,fontSize:12}}>
-            <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',color:'#0D9488'}}><input type="checkbox" checked={!!p.defensif} onChange={e=>pu({defensif:e.target.checked})}/>Défensif éligible (5 critères) → plancher {PONT_FLOOR_DEF} %</label>
-            <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',color:'#6B7280'}}><input type="checkbox" checked={!!p.passer} onChange={e=>pu({passer:e.target.checked})}/>Verdict « Passer » gravé</label>
-          </div>
+          {p.premigre&&!legacy&&(
+            <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',color:'#B45309',fontSize:12,marginBottom:10}}>
+              <input type="checkbox" checked={false} onChange={()=>pu({premigre:false})}/>Pré-migré V2.1 — base LTM encore celle du dossier V2 : cocher une fois le relevé T3 saisi (métrique par action, date)
+            </label>
+          )}
+          {isPasser&&<div style={{fontSize:11,color:'#6B7280',marginBottom:8}}>Rôle « Passer » : décision b2, aucun pont n'est construit — la table ci-dessous est facultative et n'entre pas dans le classement.</div>}
           <table style={{borderCollapse:'collapse',fontSize:12}}>
             <thead><tr>
               <th style={{textAlign:'left',color:'#9CA3AF',fontWeight:600,padding:'2px 10px 6px 0'}}>Composante (pts)</th>
@@ -583,7 +660,7 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
             </tbody>
           </table>
           <div style={{fontSize:11,color:'#9CA3AF',marginTop:8,lineHeight:1.6}}>
-            Exigé : <strong style={{color:'#6B7280'}}>{hur==null?'—':fmtRet(hur)}</strong>{[p.metric_ps,p.rf,p.prime,p.seuil_haut,p.dps,...PONT_SCENS.flatMap(x=>[...PONT_COMPS.map(c=>c.k),'mult'].map(k=>sc(x.k)[k]))].some(bad)&&<strong style={{color:'#DC2626',marginLeft:8}}>valeur illisible en rouge — corrige avant d'enregistrer</strong>}
+            Exigé : <strong style={{color:'#6B7280'}}>{hur==null?'—':fmtRet(hur)}</strong>{hur!=null&&<span> ({fmt(Math.max(rfMil,PONT_RF_FLOOR),1)} % millésime {mil} + {PONT_ROLE[p.role].prime} pts {PONT_ROLE[p.role].l.toLowerCase()})</span>}{[p.metric_ps,p.seuil_haut,p.dps,...PONT_SCENS.flatMap(x=>[...PONT_COMPS.map(c=>c.k),'mult'].map(k=>sc(x.k)[k]))].some(bad)&&<strong style={{color:'#DC2626',marginLeft:8}}>valeur illisible en rouge — corrige avant d'enregistrer</strong>}
             {isNaN(opsC)?null:<span> · central hors multiple et dividende : <strong style={{color:'#6B7280'}}>{fmtPtsH(opsC)}</strong></span>}
             {cib!=null&&<span> · cible d'entrée ≈ <strong style={{color:'#6B7280'}}>{fmt(roundCible(cib))}</strong>{dpsF>0&&<span> (dividende {fmt(dpsF/cib*100,1)} % à la cible)</span>}</span>}
           </div>
@@ -601,10 +678,18 @@ function PosForm({init,onSave,onCancel,isNew=false,s}){
           const cleanPont=raw=>{
             if(!raw) return null;
             const scn=k=>{const sc=raw.scen?.[k]||{};const o={};PONT_COMPS.forEach(c=>o[c.k]=pontNum(sc[c.k]));o.mult=pontNum(sc.mult);return o;};
-            const out={date:raw.date||null,metric_kind:raw.metric_kind||PONT_METRICS[0],metric_ps:pontNum(raw.metric_ps),rf:pontNum(raw.rf),prime:pontNum(raw.prime),
-              defensif:!!raw.defensif,passer:!!raw.passer,seuil_haut:pontNum(raw.seuil_haut),dps:pontNum(raw.dps),scen:{pess:scn('pess'),central:scn('central'),opt:scn('opt')}};
+            const role=PONT_ROLE[raw.role]?raw.role:null;
+            const mil=(raw.millesime!=null&&PONT_MILLESIMES[Number(raw.millesime)]!=null)?Number(raw.millesime):null;
+            const out={date:raw.date||null,metric_kind:raw.metric_kind||PONT_METRICS[0],metric_ps:pontNum(raw.metric_ps),
+              role,millesime:mil,rf:mil!=null?PONT_MILLESIMES[mil]:pontNum(raw.rf),premigre:!!raw.premigre&&role!=null&&role!=='passer',
+              seuil_haut:pontNum(raw.seuil_haut),dps:pontNum(raw.dps),scen:{pess:scn('pess'),central:scn('central'),opt:scn('opt')}};
+            if(!role){   // pont V2 non migré : on conserve ses clés d'exigence telles quelles (il reste « à migrer », rien n'est perdu)
+              if(raw.prime!=null) out.prime=pontNum(raw.prime);
+              if('defensif' in raw) out.defensif=!!raw.defensif;
+              if('passer' in raw) out.passer=!!raw.passer;
+            }
             if(out.scen.opt.mult==null&&PONT_COMPS.every(c=>out.scen.opt[c.k]==null)) out.scen.opt=null;   // Optimiste absent
-            const empty=out.metric_ps==null&&out.rf==null&&out.prime==null&&out.scen.central.mult==null;
+            const empty=out.metric_ps==null&&out.role==null&&out.rf==null&&out.scen.central.mult==null;
             return empty?null:out;
           };
           const clean={...f,secteur:f.secteur||null,themes:Array.isArray(f.themes)?f.themes:[],pont:cleanPont(f.pont),
@@ -737,7 +822,11 @@ function WlDeepDive({l,mg,rfLive}){
   const px=n=>n==null?'—':fmt(n)+(cur?' '+cur:'');
   if(!v.ok) return (
     <div style={{fontSize:12,color:'#9CA3AF',lineHeight:1.6}}>
-      Aucun pont de rendement renseigné. Recopie la table §8 du dossier maître (composantes, multiples de sortie, métrique par action) et le rendement exigé gravé en §9 dans l'Éditeur, section « Pont de rendement ».
+      {v.state==='passer'&&<span><strong style={{color:'#6B7280'}}>Rôle « Passer »</strong> gravé en b2 : conviction insuffisante ou pilier porteur fragile — pas de pont, pas de prix. Le dossier attend son déclencheur de réexamen.</span>}
+      {v.state==='legacy'&&(PONT_ROLE[v.p?.role]
+        ?<span><strong style={{color:'#B45309'}}>Millésime du taux manquant</strong> : le rendement exigé ne peut pas être calculé. Ouvre l'Éditeur, section « Pont de rendement », et choisis le millésime.</span>
+        :<span><strong style={{color:'#B45309'}}>Pont V2 (10 ans) non migré</strong> : un TCAC à 10 ans et une exigence « sans-risque + prime » ne se comparent pas à la grille 5 ans. Ouvre l'Éditeur, section « Pont de rendement », choisis le rôle gravé et pré-migre.</span>)}
+      {v.state==='none'&&<span>Aucun pont de rendement renseigné. Recopie la table §8 du dossier maître (composantes, multiples de sortie, métrique par action), le rôle et le millésime gravés en §9 dans l'Éditeur, section « Pont de rendement ».</span>}
     </div>
   );
   const Lbl=({children})=><div style={{fontSize:10,color:'#9CA3AF',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>{children}</div>;
@@ -745,7 +834,8 @@ function WlDeepDive({l,mg,rfLive}){
   const row={display:'flex',justifyContent:'space-between',gap:16,padding:'3px 0',fontSize:13};
   const p=v.p, c=v.scen.central, vd=VERDICT[v.verdict];
   const cibleR=roundCible(v.cible);
-  const phrase=v.verdict==='passer'?'passer':v.verdict==='achat'?'achat':('prix insuffisant, cible d\'entrée à '+px(cibleR));
+  const phrase=v.verdict==='achat'?'achat':('prix insuffisant, cible d\'entrée à '+px(cibleR));
+  const rfGap=(rfLive!=null&&v.rf!=null)?rfLive-v.rf:null;
   return (
     <div style={{display:'flex',flexWrap:'wrap',gap:14}}>
       <div style={{...card,minWidth:360}}>
@@ -773,31 +863,32 @@ function WlDeepDive({l,mg,rfLive}){
           </tbody>
         </table>
         <div style={{fontSize:10,color:'#D1D5DB',marginTop:6,lineHeight:1.5}}>
-          {p.metric_kind} {fmt(v.m)} {cur} par action · multiple d'entrée au cours {v.entryMult?fmt(v.entryMult,1)+'×':'—'}. Lignes multiple et dividende recalculées au cours ; le reste est gravé au dossier. Demi-points.
+          {p.metric_kind} {fmt(v.m)} {cur} par action · multiple d'entrée au cours {v.entryMult?fmt(v.entryMult,1)+'×':'—'}. Lignes multiple et dividende recalculées au cours ; le reste est gravé au dossier. Demi-points. Sur cinq ans, le multiple pèse deux fois plus qu'à dix — dans les deux sens.
           {!v.scen.opt&&<span> Pas de scénario optimiste : aucune option nommée au dossier.</span>}
+          {v.premigre&&<span style={{color:'#B45309'}}> Pré-migré V2.1 : base LTM encore celle du dossier V2 (relevé T3 attendu).</span>}
         </div>
       </div>
       <div style={{...card,minWidth:240}}>
         <Lbl>Rendement exigé · gravé {p.date?fmtDate(p.date):'(non daté)'}</Lbl>
-        <div style={row}><span style={{color:'#6B7280'}}>Sans-risque <span style={{color:'#9CA3AF',fontSize:11}}>(US 10 ans, gravé)</span></span><span>{p.rf!=null?fmt(p.rf,2)+' %':'—'}</span></div>
-        <div style={row}><span style={{color:'#6B7280'}}>Prime de superformance</span><span>{p.prime!=null?'+'+fmt(p.prime,1)+' pts':'—'}</span></div>
-        <div style={row}><span style={{color:'#6B7280'}}>Plancher</span><span style={{color:p.defensif?'#0D9488':'#6B7280'}}>{p.defensif?PONT_FLOOR_DEF+' % · défensif éligible':PONT_FLOOR+' % · standard'}</span></div>
+        <div style={row}><span style={{color:'#6B7280'}}>Sans-risque <span style={{color:'#9CA3AF',fontSize:11}}>(Treasury 5 ans, millésime {p.millesime||'—'})</span></span><span>{v.rf!=null?fmt(v.rf,1)+' %':'—'}{v.rf!=null&&v.rf<PONT_RF_FLOOR&&<span style={{color:'#9CA3AF',fontSize:11}}> → plancher {PONT_RF_FLOOR} %</span>}</span></div>
+        <div style={row}><span style={{color:'#6B7280'}}>Rôle <span style={{color:'#9CA3AF',fontSize:11}}>(gravé c2, critères)</span></span><span style={{color:v.role.c,fontWeight:600}}>{v.role.l} · +{v.role.prime} pts{v.roleMismatch&&<span style={{color:'#D97706',marginLeft:5}} title={'Catégorie d\u2019allocation « '+l.cat+' » ≠ rôle gravé'}>⚠</span>}</span></div>
         <div style={{...row,borderTop:'1px solid #F0EFE9',marginTop:2,paddingTop:5}}><span style={{color:'#6B7280',fontWeight:600}}>= Exigé</span><strong>{fmtRet(v.hurdle)}</strong></div>
-        {rfLive!=null&&p.rf!=null&&<div style={{fontSize:10,color:'#D1D5DB',marginTop:6,lineHeight:1.5}}>10 ans US aujourd'hui {fmt(rfLive,2)} % ({(rfLive-p.rf>=0?'+':'')+fmt(rfLive-p.rf,2)} pt) — révision en revue annuelle uniquement, jamais un capteur.</div>}
+        {rfGap!=null&&<div style={{fontSize:10,color:Math.abs(rfGap)>0.5?'#D97706':'#D1D5DB',marginTop:6,lineHeight:1.5}}>5 ans US aujourd'hui {fmt(rfLive,2)} % ({(rfGap>=0?'+':'')+fmt(rfGap,2)} pt vs millésime){Math.abs(rfGap)>0.5?' — hors bande morte ±0,5 : millésime révisable en janvier':' — dans la bande morte ±0,5'}. Jamais un capteur, jamais appliqué.</div>}
+        {v.roleMismatch&&<div style={{fontSize:10,color:'#D97706',marginTop:4,lineHeight:1.5}}>Catégorie d'allocation « {l.cat} » ≠ rôle gravé « {v.role.l} » : le rôle est une catégorie d'exigence, pas une allocation — mais l'écart mérite une ligne en revue annuelle.</div>}
         {v.stale&&<div style={{fontSize:11,color:'#D97706',fontWeight:600,marginTop:6}}>Dossier de {v.ageM} mois → revue annuelle due.</div>}
       </div>
       <div style={{...card,minWidth:280,maxWidth:360}}>
         <Lbl>Verdict · mécanique</Lbl>
         <div style={{display:'inline-block',padding:'3px 10px',borderRadius:6,fontWeight:700,fontSize:13,color:vd?vd.c:'#9CA3AF',background:vd?vd.c+'14':'#F5F5F4'}}>{vd?vd.l:'—'}</div>
-        <div style={{fontSize:13,color:'#191919',marginTop:8,lineHeight:1.5,fontStyle:'italic'}}>« Le scénario central offre {fmtRet(c.tcac)} pour un profil qui en exige {fmtRet(v.hurdle)} → {phrase}. »</div>
+        <div style={{fontSize:13,color:'#191919',marginTop:8,lineHeight:1.5,fontStyle:'italic'}}>« Le scénario central offre {fmtRet(c.tcac)} sur cinq ans pour un profil qui en exige {fmtRet(v.hurdle)} → {phrase}. »</div>
         <div style={{...row,marginTop:8,borderTop:'1px solid #F0EFE9',paddingTop:6}}><span style={{color:'#6B7280',fontWeight:600}}>Excès vs exigé</span><strong style={{fontSize:15,color:excessClr(v.excess)}}>{fmtPtsH(v.excess)}</strong></div>
-        {p.passer&&<div style={{fontSize:10,color:'#D1D5DB',marginTop:6}}>« Passer » est gravé au dossier : la décision prime sur la comparaison mécanique.</div>}
+        <div style={{fontSize:10,color:'#D1D5DB',marginTop:6}}>« Passer » n'est pas une issue du verdict : ici, un titre a toujours un prix.</div>
       </div>
       <div style={{...card,minWidth:240}}>
         <Lbl>Conditions de réexamen</Lbl>
         <div style={row}><span style={{color:'#6B7280'}}>Cible d'entrée <span style={{color:'#9CA3AF',fontSize:11}}>(bas)</span></span><span><strong>{px(cibleR)}</strong> <span style={{color:mosClr(v.marge),fontWeight:700,marginLeft:6}}>{v.marge==null?'':(v.marge>=0?'+':'')+fmt(v.marge,0)+' %'}</span></span></div>
         <div style={row}><span style={{color:'#6B7280'}}>Sur-extension <span style={{color:'#9CA3AF',fontSize:11}}>(haut)</span></span><span>{v.seuilHaut!=null?<strong style={{color:v.overHaut?'#DC2626':'#191919'}}>{px(v.seuilHaut)}{v.overHaut?' · atteint':''}</strong>:<span style={{color:'#D1D5DB'}}>non saisi</span>}</span></div>
-        <div style={{fontSize:10,color:'#D1D5DB',marginTop:6,lineHeight:1.5}}>Cible = cours auquel le central atteint l'exigé (ajustement par le multiple d'entrée), arrondie au chiffre rond. Les capteurs de la thèse (§4) vivent dans le dossier, pas ici.</div>
+        <div style={{fontSize:10,color:'#D1D5DB',marginTop:6,lineHeight:1.5}}>Cible = cours auquel le central atteint l'exigé sur cinq ans (1D et 1E recalculées à ce prix), arrondie au chiffre rond. Les capteurs de la thèse (§4) et les mouvements de rôle vivent dans le dossier, pas ici.</div>
       </div>
     </div>
   );
@@ -837,7 +928,7 @@ function App(){
   const [editorTab,setEditorTab]=useState('portfolio'); // sous-onglet éditeur : portfolio / watchlist / sortis
   const [wlSort,    setWlSort]   = useState('excess');  // tri watchlist : excès vs exigé / marge vs cible / TCAC central / TCAC pessimiste
   const [wlExp,     setWlExp]    = useState(new Set()); // lignes watchlist dépliées (deep dive pont de rendement)
-  const [rfLive,    setRfLive]   = useState(null);      // US 10 ans live (^TNX), affiché en écart vs sans-risque gravé — jamais appliqué
+  const [rfLive,    setRfLive]   = useState(null);      // US 5 ans live (^FVX), affiché en écart vs millésime (bande morte ±0,5) — jamais appliqué
   // ── État module Risque ──
   const [riskBusy,  setRiskBusy]  = useState(false);
   const [riskErr,   setRiskErr]   = useState(null);
@@ -995,7 +1086,7 @@ function App(){
       const px=await fetchAllPrices(allTickers);
       const newFX={};
       FX_TICKERS.forEach(t=>{if(px[t]){newFX[t]=px[t].p;delete px[t];}});
-      if(px[RF_TICKER]){const r=px[RF_TICKER].p;setRfLive(r>15?r/10:r);delete px[RF_TICKER];}  // ^TNX : en % direct (4,37) ou en dixièmes (43,7) selon l'époque
+      if(px[RF_TICKER]){const r=px[RF_TICKER].p;setRfLive(r>15?r/10:r);delete px[RF_TICKER];}  // ^FVX : en % direct (4,99) ou en dixièmes (49,9) selon l'époque
       setFX(newFX);setPrices(px);setLastUpd(new Date());
     }catch(e){setError('Erreur : '+e.message);}
     setFetching(false);
@@ -1357,7 +1448,7 @@ function App(){
   // ── Watchlist fusionnée ──
   const seenTk=new Set(); const wlMerged=[];
   // 1) titres DÉTENUS avec un pont renseigné (suivi de la cible d'entrée / du verdict sur ce qu'on possède)
-  pos.filter(p=>p.env!==WL_ENV && hasPont(p) && calc[p.id].qte>0).forEach(p=>{
+  pos.filter(p=>p.env!==WL_ENV && pontState(p)!=='none' && calc[p.id].qte>0).forEach(p=>{   // tout pont (V2.1, V2 à migrer, passer)
     if(!seenTk.has(p.ticker)){seenTk.add(p.ticker);wlMerged.push({...p,wlType:'portfolio'});}
   });
   // 2) lignes WATCHLIST (positions enveloppe=Watchlist, pas encore achetées) — éditées dans l'Éditeur
@@ -1387,8 +1478,8 @@ function App(){
     return v.excess;                             // 'excess' (défaut)
   };
   wlRows.sort((A,B)=>{
-    const aP=A.mg.pont.ok&&A.mg.pont.verdict==='passer', bP=B.mg.pont.ok&&B.mg.pont.verdict==='passer';
-    if(aP!==bP) return aP?1:-1;                  // « Passer » gravé → en bas
+    const ra=PONT_STATE_RANK[A.mg.pont.state]??2, rb=PONT_STATE_RANK[B.mg.pont.state]??2;
+    if(ra!==rb) return ra-rb;                    // calculables d'abord, puis V2 à migrer, sans pont, « Passer » en bas
     const va=sortVal(A.l,A.mg), vb=sortVal(B.l,B.mg);
     const na=(va==null||isNaN(va)), nb=(vb==null||isNaN(vb));
     if(na!==nb) return na?1:-1;                  // sans pont / valeurs manquantes → en bas
@@ -1587,7 +1678,8 @@ function App(){
                 <button key={id} onClick={()=>setWlSort(id)}
                   style={{...s.btn,background:wlSort===id?'#191919':'#F0EFE9',color:wlSort===id?'#fff':'#6B7280',padding:'4px 12px',fontSize:12}}>{l}</button>
               ))}
-              {rfLive!=null&&<span style={{fontSize:11,color:'#9CA3AF',marginLeft:8}} title="Indicatif : à comparer au sans-risque gravé dans chaque dossier (revue annuelle)">10 ans US : <strong style={{color:'#6B7280'}}>{fmt(rfLive,2)} %</strong></span>}
+              <span style={{fontSize:11,color:'#9CA3AF',marginLeft:8}} title="Treasury US 5 ans retenu pour l'année (methode_pipeline.md §7.3) — fixé en janvier, jamais un taux spot">Millésime {PONT_MILLESIME_DEF} : <strong style={{color:'#6B7280'}}>{fmt(PONT_MILLESIMES[PONT_MILLESIME_DEF],1)} %</strong></span>
+              {rfLive!=null&&<span style={{fontSize:11,color:'#9CA3AF'}} title="Indicatif : écart au millésime, bande morte ±0,5 pt pour la révision de janvier">· 5 ans US live : <strong style={{color:Math.abs(rfLive-PONT_MILLESIMES[PONT_MILLESIME_DEF])>0.5?'#D97706':'#6B7280'}}>{fmt(rfLive,2)} %</strong></span>}
             </div>
 
             <div style={{overflowX:'auto',borderRadius:12,border:'1px solid #EEEDE9',background:'#FFFFFF'}}>
@@ -1601,7 +1693,7 @@ function App(){
                     <th style={s.th} title="Cours auquel le scénario central atteint le rendement exigé (via le multiple d'entrée)">Cible d'entrée</th>
                     <th style={s.th} title="Décote restante entre le cours et la cible d'entrée">Marge</th>
                     <th style={{...s.th,minWidth:110}} title={'TCAC '+PONT_H+' ans par scénario — Central (gras), Pessimiste, Optimiste'}>TCAC {PONT_H} ans</th>
-                    <th style={s.th} title="Rendement exigé gravé au dossier (sans-risque + prime, plancher 10 % / 8 % défensif)">Exigé</th>
+                    <th style={s.th} title="Rendement exigé gravé au dossier : max(taux millésimé ; 3 %) + prime de rôle (D +5 / C +7 / S +9)">Exigé</th>
                     <th style={s.th} title="Excès = TCAC central − rendement exigé (points)">Δ</th>
                     <th style={s.th}>Verdict</th>
                     <th style={s.th}></th>
@@ -1615,7 +1707,7 @@ function App(){
                   )}
                   {wlRows.map(({l,mg},idx)=>{
                     const v=mg.pont;
-                    const vd=(v.ok&&v.verdict)?VERDICT[v.verdict]:null;
+                    const vd=(v.ok&&v.verdict)?VERDICT[v.verdict]:(v.state==='passer'||v.state==='legacy')?VERDICT[v.state]:null;
                     const rowBg=vd?vd.bg:'transparent';
                     const cibleR=v.ok?roundCible(v.cible):null;
                     const isExp=wlExp.has(l.ticker);
@@ -1673,9 +1765,10 @@ function App(){
                         </td>
                         <td style={s.td}>
                           {!v.ok?<span style={{color:'#D1D5DB'}}>—</span>:(
-                            <span style={{whiteSpace:'nowrap'}} title={'Sans-risque '+(v.p.rf!=null?fmt(v.p.rf,2)+' %':'—')+' + prime '+(v.p.prime!=null?fmt(v.p.prime,1)+' pts':'—')+(v.p.defensif?' · plancher 8 % (défensif éligible)':' · plancher 10 %')}>
+                            <span style={{whiteSpace:'nowrap'}} title={'max('+fmt(v.rf,1)+' % millésime '+(v.p.millesime||'—')+' ; '+PONT_RF_FLOOR+' %) + '+v.role.prime+' pts ('+v.role.l+')'}>
                               <span style={{fontWeight:600,color:'#6B7280'}}>{fmtRet(v.hurdle)}</span>
-                              {v.p.defensif&&<span style={{marginLeft:5,fontSize:10,fontWeight:700,color:'#0D9488'}} title="Défensif éligible (5 critères)">D</span>}
+                              <span style={{marginLeft:5,fontSize:10,fontWeight:700,color:v.role.c}} title={'Rôle gravé : '+v.role.l+' (+'+v.role.prime+' pts)'}>{v.role.s}</span>
+                              {v.roleMismatch&&<span style={{marginLeft:3,fontSize:10,color:'#D97706'}} title={'Catégorie d\u2019allocation « '+l.cat+' » ≠ rôle gravé'}>⚠</span>}
                             </span>
                           )}
                         </td>
@@ -1686,6 +1779,7 @@ function App(){
                               <span style={{padding:'2px 8px',borderRadius:5,fontSize:11,fontWeight:700,color:vd.c,background:vd.c+'14'}}>{vd.l}</span>
                               {v.stale&&<span style={{color:'#D97706',fontSize:12}} title={'Dossier de '+v.ageM+' mois — revue annuelle due'}>⚠︎</span>}
                               {v.overHaut&&<span style={{color:'#DC2626',fontSize:11,fontWeight:700}} title="Seuil de sur-extension atteint">↑</span>}
+                              {v.premigre&&<span style={{fontSize:9,fontWeight:700,color:'#B45309',border:'1px solid #FDE68A',borderRadius:4,padding:'0 4px'}} title="Pré-migré V2.1 — base LTM à rafraîchir au relevé T3">LTM</span>}
                             </span>
                           ):<span style={{color:'#D1D5DB'}} title="Pas de pont de rendement renseigné">—</span>}
                         </td>
@@ -1717,7 +1811,7 @@ function App(){
                 </tbody>
               </table>
             </div>
-            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>▸ Chevron = table §8 complète, exigé, verdict, conditions de réexamen · MM200 = écart à la moyenne mobile 200 j · TCAC : central en gras, P = pessimiste, O = optimiste (« — » = pas d'option nommée) · D = défensif éligible · Δ = central − exigé · ⚠︎ = dossier de plus de 12 mois · ↑ = seuil de sur-extension atteint · verdict : Achat ↔ central ≥ exigé, sinon Prix insuffisant ; « Passer » gravé passe en bas</div>
+            <div style={{fontSize:11,color:'#D1D5DB',marginTop:8}}>▸ Chevron = table §8 complète, exigé, verdict, conditions de réexamen · MM200 = écart à la moyenne mobile 200 j · TCAC {PONT_H} ans : central en gras, P = pessimiste, O = optimiste (« — » = pas d'option nommée) · D / C / S = rôle gravé (défensif +5 / cœur +7 / satellite +9) · Δ = central − exigé · ⚠︎ = dossier de plus de 12 mois · ↑ = seuil de sur-extension atteint · LTM = pré-migré, base à rafraîchir au relevé T3 · verdict : Achat ↔ central ≥ exigé, sinon Prix insuffisant ; « V2 · à migrer » et « Passer » (b2) descendent en bas</div>
           </div>
         )}
 
@@ -2071,8 +2165,8 @@ function App(){
                           <td style={{...s.td,color:'#6B7280'}}>{fmtDate(c.firstBuy)}</td>
                           <td style={{...s.td,color:'#DC2626',fontWeight:600}}>{fmtDate(c.last)}</td>
                           <td style={{...s.td,color:'#6B7280'}}>{heldMonths==null?'—':heldMonths+' mois'}</td>
-                          <td style={{...s.td,color:'#6B7280',fontSize:12}}>{hasPont(p)?(p.pont.date?fmtDate(p.pont.date):'✓'):'—'}</td>
-                          <td style={{...s.td,color:'#6B7280'}}>{hasPont(p)?fmtRet(pontHurdle(p.pont)):'—'}</td>
+                          <td style={{...s.td,color:'#6B7280',fontSize:12}}>{pontOf(p)?(p.pont.date?fmtDate(p.pont.date):'✓'):'—'}</td>
+                          <td style={{...s.td,color:pontState(p)==='legacy'?'#B45309':'#6B7280'}}>{pontExigeLabel(pontOf(p))}</td>
                         </tr>
                         {isExp&&(
                           <tr><td colSpan={8} style={{padding:'12px 24px',background:'#FAFAF8',borderBottom:'1px solid #EEEDE9'}}>
@@ -2335,8 +2429,8 @@ function App(){
                             <td style={{...s.td,color:c.qte>0?'#6B7280':'#D1D5DB'}}>{c.qte||0}</td>
                             <td style={{...s.td,color:'#6B7280'}}>{fmtDate(c.firstBuy)}</td>
                             <td style={{...s.td,color:c.lastType==='vente'?'#DC2626':'#6B7280'}}>{fmtDate(c.last)}</td>
-                            <td style={{...s.td,color:'#6B7280',fontSize:12}}>{hasPont(p)?(p.pont.date?fmtDate(p.pont.date):'✓'):'—'}</td>
-                            <td style={{...s.td,color:'#6B7280'}}>{hasPont(p)?fmtRet(pontHurdle(p.pont)):'—'}</td>
+                            <td style={{...s.td,color:'#6B7280',fontSize:12}}>{pontOf(p)?(p.pont.date?fmtDate(p.pont.date):'✓'):'—'}</td>
+                            <td style={{...s.td,color:pontState(p)==='legacy'?'#B45309':'#6B7280'}}>{pontExigeLabel(pontOf(p))}</td>
                             <td style={s.td}>
                               <div style={{display:'flex',gap:4}}>
                                 <button style={{...s.btn,background:'#F0EFE9',color:'#6B7280',padding:'3px 10px',fontSize:12}} onClick={()=>{setEditId(p.id);setAddNew(false);}}>✏️</button>
